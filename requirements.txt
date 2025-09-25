@@ -1,0 +1,42 @@
+# AWS SDK for Python - used to interact with AWS services like S3
+boto3 
+
+# Loads environment variables from a .env file (for AWS keys, configs, etc.)
+python-dotenv 
+
+# Web framework for building APIs (your ingestion API is based on FastAPI)
+fastapi 
+
+# ASGI server to run FastAPI apps in production
+uvicorn 
+
+# Data validation and parsing library (used for request/response models in FastAPI)
+pydantic
+
+# Extension for Pydantic to manage settings from env/config files
+pydantic-settings
+
+# Testing framework for Python (used for writing unit/integration tests)
+pytest 
+
+# Async test support for pytest (needed because FastAPI & boto3 support async)
+pytest-asyncio
+
+# Web UI framework for building interactive dashboards/apps (your S3 ingestion UI)
+streamlit
+
+# Data analysis/manipulation library (for working with CSVs, ETL, analytics)
+pandas
+
+# Data visualization library (integrated into Streamlit for charts, dashboards)
+plotly 
+
+# SQL toolkit & ORM for Python (to interact with MySQL or other RDS DBs)
+SQLAlchemy
+
+# MySQL database adapter for Python (used by SQLAlchemy to connect to AWS RDS)
+PyMySQL
+
+# Pretty-print tabular data in CLI outputs and reports
+tabulate
+git-filter-repo
