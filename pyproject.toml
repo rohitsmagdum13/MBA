@@ -29,11 +29,15 @@ dev = [
 ]
 
 [project.scripts]
-hma-ingest = "MBA.cli:main"
-hma-producer = "MBA.microservices.producer:main"
-hma-worker = "MBA.microservices.worker:main"
-hma-api = "MBA.microservices.api:run_server"
-hma-db = "MBA.database.cli:main"
+# CLI tools you already had
+mba-ingest = "MBA.cli:main"
+mba-producer = "MBA.microservices.producer:main"
+mba-worker = "MBA.microservices.worker:main"
+mba-api = "MBA.microservices.api:run_server"
+mba-db = "MBA.database.cli:main"
+
+# NEW: Streamlit launcher (calls MBA.streamlit_app:main)
+mba-app = "MBA.app_launcher:main"
 
 [build-system]
 requires = ["hatchling"]

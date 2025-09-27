@@ -289,6 +289,91 @@ for dir in /data/*/; do
 done
 ```
 
+repo-root/
+├─ .env
+├─ pyproject.toml
+├─ requirements.txt
+├─ logs/
+├─ data/
+├─ src/
+│  └─ MBA/
+│     ├─ core/
+│     │  ├─ settings.py
+│     │  ├─ logging_config.py
+│     │  └─ exceptions.py
+│     ├─ services/
+│     │  ├─ s3_client.py
+│     │  └─ file_utils.py
+│     ├─ etl/
+│     │  ├─ __init__.py
+│     │  ├─ csv_schema.py          # → infer schema & generate CREATE TABLE
+│     │  ├─ transforms.py          # → optional row-level transforms
+│     │  ├─ db.py                  # → RDS engine + helpers (SQLAlchemy)
+│     │  └─ loader.py              # → class: CsvToMySQLLoader
+│     └─ lambda_handlers/
+│        └─ csv_ingest_lambda.py   # → Lambda entrypoint (S3 trigger)
+
+
+
+
+
++--------------------------------------+
+| Amazon S3                            |
+| memberbenefitassistant-bucket        |
+|  └── mba/csv/*.csv                   |
++---------------------+----------------+
+                      |
+                      | PutObject event
+                      v
++--------------------------------------+
+| AWS Lambda: mba-csv-rds-ingest       |
+| - loads .env settings                |
+| - downloads CSV                      |
+| - infers schema + CREATE TABLE       |
+| - inserts rows (batch)               |
+| - (optional) writes audit row        |
++---------------------+----------------+
+                      |
+                      | MySQL traffic (3306)
+                      v
++--------------------------------------+
+| Amazon RDS for MySQL (Public)        |
+| hma_Mysql DB                         |
+| Tables: memberdata,                  |
+|         benefit_accumulator,         |
+|         deductibles_oop,             |
+|         plan_details,                |
+|         ingestion_audit (optional)   |
++--------------------------------------+
+
+
+-- connect to your RDS host as admin
+-- host: mysql-hma.cobyueoimrmh.us-east-1.rds.amazonaws.com  port: 3306
+-- user: admin  (or your chosen user)
+-- then run:
+CREATE DATABASE IF NOT EXISTS mba_mysql CHARACTER SET utf8mb4;
+
+-- grant permissions to your ingest user (admin may already have all):
+GRANT CREATE, ALTER, INSERT, UPDATE, DELETE, SELECT ON mba_mysql.* TO 'admin'@'%';
+FLUSH PRIVILEGES;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 ## 🤝 Contributing
 
 Contributions are welcome! The codebase follows these principles:

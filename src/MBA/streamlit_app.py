@@ -15,6 +15,9 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import boto3
 from dataclasses import dataclass, asdict
+from sqlalchemy import create_engine, text
+from sqlalchemy.exc import SQLAlchemyError, OperationalError
+import sqlalchemy
 
 # Add src to path
 import sys
@@ -1119,6 +1122,170 @@ def render_settings_tab():
         if st.button("💾 Save Advanced Settings"):
             st.success("Advanced settings saved")
 
+# ---------- DB Browser helpers ----------
+def _db_url_read_only() -> str:
+    """
+    Build a SQLAlchemy MySQL URL from env (via settings),
+    intended for a READ-ONLY DB user (provision in RDS).
+    """
+    # Your settings already hold these (pydantic-settings).
+    # Ensure the user is a READ-ONLY user at the DB level.
+    user = settings.RDS_USERNAME
+    pwd = settings.RDS_PASSWORD
+    host = settings.RDS_HOST
+    port = settings.RDS_PORT
+    db   = settings.RDS_DATABASE
+
+    # mysql+pymysql URL
+    return f"mysql+pymysql://{user}:{pwd}@{host}:{port}/{db}?charset=utf8mb4"
+
+
+@st.cache_resource(show_spinner=False)
+def _get_ro_engine() -> "sqlalchemy.engine.Engine":
+    """
+    Cached SQLAlchemy engine. Keep it read-only by using a read-only user.
+    (We only run SELECTs here.)
+    """
+    url = _db_url_read_only()
+    # shorter timeouts so UI stays responsive
+    eng = create_engine(
+        url,
+        pool_pre_ping=True,
+        pool_recycle=1200,
+        connect_args={"connect_timeout": 5, "read_timeout": 5, "write_timeout": 5},
+    )
+    return eng
+
+
+def _safe_select_df(sql: str, params: dict | None = None) -> pd.DataFrame:
+    """
+    Run a SELECT and return a DataFrame. Friendly error handling.
+    """
+    try:
+        eng = _get_ro_engine()
+        with eng.connect() as conn:
+            return pd.read_sql(text(sql), conn, params=params or {})
+    except OperationalError as e:
+        st.error(f"Database connectivity issue: {e}")
+    except SQLAlchemyError as e:
+        st.error(f"Query failed: {e}")
+    except Exception as e:
+        st.error(f"Unexpected error: {e}")
+    return pd.DataFrame()
+
+def _table_count(table: str) -> int:
+    """
+    COUNT(*) with graceful handling if the table is missing/empty.
+    """
+    try:
+        df = _safe_select_df(f"SELECT COUNT(*) AS c FROM `{table}`")
+        return int(df["c"].iloc[0]) if not df.empty else 0
+    except Exception:
+        # probably table doesn't exist yet
+        return 0
+
+# Example usage to avoid "not accessed" warning
+# _table_count("your_table_name")
+        return 0
+def render_db_browser_tab():
+    """Render a read-only DB Browser tab for RDS (MySQL)."""
+    st.markdown("### 🧭 DB Browser (Read-only)")
+
+    # Refresh + connectivity check
+    c1, c2, c3 = st.columns([1,1,3])
+    with c1:
+        refresh = st.button("🔄 Refresh", help="Re-run the queries")
+    with c2:
+        with st.spinner("Checking DB health..."):
+            try:
+                # tiny ping
+                _ = _safe_select_df("SELECT 1 AS ok")
+                st.success("DB reachable")
+            except Exception:
+                st.warning("DB ping failed")
+
+    # Table counts
+    st.markdown("#### 📦 Table Counts")
+    tables = [
+        "memberdata",
+        "benefit_accumulator",
+        "deductibles_oop",
+        "plan_details",
+        "ingestion_audit",
+    ]
+
+    with st.spinner("Loading counts..."):
+        counts = []
+        for t in tables:
+            cnt = _table_count(t)
+            counts.append({"table": t, "rows": cnt})
+        df_counts = pd.DataFrame(counts)
+
+    if df_counts.empty:
+        st.info("No tables found yet.")
+    else:
+        st.dataframe(
+            df_counts.sort_values("table"),
+            width="stretch",
+            hide_index=True,
+        )
+
+    # Recent audit entries
+    st.markdown("#### 🧾 Recent Audit Entries")
+    with st.spinner("Loading recent audits..."):
+        audits = _safe_select_df(
+            """
+            SELECT 
+                id,
+                started_at,
+                finished_at,
+                s3_key,
+                status,
+                COALESCE(rows_inserted, 0) AS rows_inserted,
+                LEFT(COALESCE(error_message,''), 180) AS error_snippet
+            FROM ingestion_audit
+            ORDER BY started_at DESC
+            LIMIT 50
+            """
+        )
+
+    if audits.empty:
+        st.info("No audit data yet.")
+    else:
+        # Format datetimes for display
+        for col in ("started_at","finished_at"):
+            if col in audits.columns:
+                audits[col] = pd.to_datetime(audits[col]).dt.strftime("%Y-%m-%d %H:%M:%S")
+        audits = audits.rename(
+            columns={
+                "id": "audit_id",
+                "s3_key": "key",
+                "error_snippet": "error",
+            }
+        )
+        st.dataframe(audits, width="stretch", hide_index=True)
+
+    # File preview (local upload; no write-back)
+    st.markdown("#### 📄 Quick File Preview (Local Only)")
+    up = st.file_uploader("Upload a CSV or JSON to preview", type=["csv","json"])
+    if up is not None:
+        try:
+            with st.spinner("Parsing file..."):
+                if up.name.lower().endswith(".csv"):
+                    df_prev = pd.read_csv(up)
+                else:
+                    df_prev = pd.read_json(up)
+            st.success(f"Previewing **{up.name}** — {len(df_prev):,} rows")
+            st.dataframe(df_prev.head(200), width="stretch", hide_index=True)
+        except Exception as e:
+            st.error(f"Could not parse file: {e}")
+
+    # Manual refresh (rerun), last in the tab
+    if refresh:
+        st.toast("Refreshed", icon="🔄")
+        st.rerun()
+
+
 def main():
     """Main application entry point"""
     # Render header
@@ -1136,6 +1303,7 @@ def main():
         "🔍 Duplicate Detection", 
         "📤 Upload",
         "🗂️ S3 Browser",
+        "🧭 DB Browser",
         "📊 Analytics",
         "⚙️ Settings"
     ])
@@ -1153,22 +1321,25 @@ def main():
         render_s3_browser_tab()
     
     with tabs[4]:
-        render_analytics_tab()
-    
+        render_db_browser_tab()
+
     with tabs[5]:
+        render_analytics_tab()
+
+    with tabs[6]:
         render_settings_tab()
-    
-    # Footer
-    st.markdown("---")
-    st.markdown(
-        """
-        <div style="text-align: center; color: #6b7280; padding: 1rem;">
-            <p>MBA S3 Data Ingestion Portal v1.0.0</p>
-            <p>© 2024 MBA - Healthcare Management Associates</p>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+        
+        # Footer
+        st.markdown("---")
+        st.markdown(
+            """
+            <div style="text-align: center; color: #6b7280; padding: 1rem;">
+                <p>MBA S3 Data Ingestion Portal v1.0.0</p>
+                <p>© 2024 MBA - Healthcare Management Associates</p>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
 if __name__ == "__main__":
     main()
