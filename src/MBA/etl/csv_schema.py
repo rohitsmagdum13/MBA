@@ -1,14 +1,17 @@
 """
-csv_schema.py
-Infer MySQL table schema from a CSV file:
-- Reads header to get column names.
-- Samples rows to infer types and max lengths.
-- Produces CREATE TABLE DDL with sane defaults.
+Infer MySQL table schema from CSV files.
 
-Notes:
-- Exact table name = sanitized base filename (without extension).
-- Column names are normalized to snake_case and backticked in SQL.
-- Type mapping is conservative to avoid load-time failures.
+Analyzes CSV structure and data to generate appropriate MySQL CREATE TABLE
+statements with proper data types and constraints.
+
+Module Input:
+    - CSV file content as bytes
+    - Number of rows to sample for type inference
+
+Module Output:
+    - Column statistics with inferred types
+    - CREATE TABLE DDL statements
+    - Delimiter detection results
 """
 
 from __future__ import annotations
@@ -26,6 +29,23 @@ logger = get_logger(__name__)
 _SNAKE = re.compile(r"[^0-9a-zA-Z]+")
 
 def to_snake(name: str) -> str:
+    """
+    Convert arbitrary string to snake_case identifier.
+    
+    Normalizes column names for MySQL compatibility by converting to
+    snake_case and handling special characters.
+    
+    Args:
+        name (str): Original column name from CSV
+        
+    Returns:
+        str: MySQL-safe snake_case identifier
+        
+    Examples:
+        "First Name" -> "first_name"
+        "ZIP-Code" -> "zip_code"
+        "123Data" -> "c_123data"
+    """
     base = _SNAKE.sub("_", name).strip("_")
     # avoid starting with digit
     if base and base[0].isdigit():
@@ -82,8 +102,25 @@ def _maybe_datetime(v: str) -> bool:
 
 def infer_schema_from_csv_bytes(content: bytes, sample_rows: int = 500) -> Tuple[str, List[ColumnStat]]:
     """
-    Infer column stats from CSV bytes.
-    Returns: (dialect_delimiter, stats)
+    Infer column statistics from CSV bytes.
+    
+    Analyzes CSV content to detect delimiter, column types, and constraints
+    by sampling rows and testing type compatibility.
+    
+    Args:
+        content (bytes): Raw CSV file content
+        sample_rows (int): Maximum rows to analyze for type inference
+        
+    Returns:
+        Tuple[str, List[ColumnStat]]: Tuple containing:
+            - str: Detected delimiter character
+            - List[ColumnStat]: Column statistics for each field
+            
+    Raises:
+        ValueError: If CSV has no header row
+        
+    Side Effects:
+        - None (pure function)
     """
     # Use csv.Sniffer to detect delimiter
     head = content[:8192].decode("utf-8", errors="ignore")
@@ -124,8 +161,19 @@ def infer_schema_from_csv_bytes(content: bytes, sample_rows: int = 500) -> Tuple
 
 def mysql_type_for(col: ColumnStat) -> str:
     """
-    Choose the narrowest MySQL type compatible with observations.
-    Precedence: datetime > date > int > float > bool > varchar/longtext
+    Choose appropriate MySQL data type for column.
+    
+    Selects the most specific MySQL type that can accommodate all
+    observed values in the column.
+    
+    Args:
+        col (ColumnStat): Column statistics from inference
+        
+    Returns:
+        str: MySQL type definition (e.g., "VARCHAR(255)", "BIGINT")
+        
+    Type Precedence:
+        DATETIME > DATE > BIGINT > DECIMAL > TINYINT > VARCHAR > TEXT
     """
     # datetime vs date
     if col.is_datetime: return "DATETIME"
@@ -146,7 +194,24 @@ def mysql_type_for(col: ColumnStat) -> str:
 
 def build_create_table_sql(table: str, cols: List[ColumnStat]) -> str:
     """
-    Generate CREATE TABLE IF NOT EXISTS DDL with backticked identifiers.
+    Generate CREATE TABLE IF NOT EXISTS DDL.
+    
+    Builds complete MySQL table definition with proper escaping and
+    character set configuration.
+    
+    Args:
+        table (str): Target table name
+        cols (List[ColumnStat]): Column definitions from inference
+        
+    Returns:
+        str: Complete CREATE TABLE statement
+        
+    Example Output:
+        CREATE TABLE IF NOT EXISTS `member_data` (
+          `member_id` BIGINT NOT NULL,
+          `first_name` VARCHAR(100) NULL,
+          `enrollment_date` DATE NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """
     lines = []
     for c in cols:

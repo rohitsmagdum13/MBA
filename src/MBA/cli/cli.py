@@ -1,4 +1,31 @@
-"""Monolithic CLI for MBA data ingestion to S3 with duplicate detection."""
+"""
+Monolithic CLI for MBA data ingestion to S3 with duplicate detection.
+
+This module provides the main command-line interface for the MBA ingestion system,
+supporting both monolithic and microservices modes of operation. It handles file
+discovery, duplicate detection, and batch uploads to S3 with comprehensive
+error handling and progress tracking.
+
+The CLI supports three primary modes:
+- monolith: Direct upload with all processing in a single process
+- micro: Enqueues jobs for distributed processing via workers
+- check-duplicates: Scans for duplicate files without uploading
+
+Key Features:
+- Automatic scope detection from file paths (mba/policy)
+- Local and S3 duplicate detection with MD5 hashing
+- Concurrent uploads with configurable parallelism
+- Dry-run mode for testing configurations
+- Comprehensive audit logging and error reporting
+
+Usage:
+    MBA-ingest --input ./data --auto-detect-scope
+    MBA-ingest --mode check-duplicates --input ./data --check-s3
+    MBA-ingest --input ./data --scope mba --dry-run
+
+Author: MBA Healthcare Management Associates
+Version: 1.0.0
+"""
 import argparse
 import sys
 from pathlib import Path
@@ -21,7 +48,23 @@ logger = get_logger(__name__)
 
 
 class Uploader:
-    """Handles file uploads to S3 with duplicate detection."""
+    """
+    Handles file uploads to S3 with duplicate detection.
+    
+    This class encapsulates the upload logic including duplicate detection,
+    retry mechanisms, and progress tracking for batch file uploads.
+    
+    Attributes:
+        scope (Optional[str]): Upload scope ("mba" or "policy")
+        dry_run (bool): If True, simulates upload without actual transfer
+        auto_detect_scope (bool): If True, detects scope from file path
+        skip_duplicates (bool): If True, skips files that already exist
+        overwrite (bool): If True, overwrites existing files in S3
+        duplicate_detector (DuplicateDetector): Instance for duplicate checking
+        bucket (Optional[str]): Target S3 bucket name
+        prefix (Optional[str]): S3 key prefix
+        session (Optional[boto3.Session]): AWS session for S3 operations
+    """
     
     def __init__(
         self,
@@ -34,16 +77,23 @@ class Uploader:
         overwrite: bool = False  # New parameter
     ):
         """
-        Initialize uploader.
+        Initialize uploader with configuration options.
         
         Args:
             scope: Upload scope ("mba" or "policy"), optional if auto_detect_scope is True
-            aws_profile: AWS profile to use
-            region: AWS region
-            dry_run: If True, only print what would be done
-            auto_detect_scope: If True, detect scope from file path
-            skip_duplicates: If True, skip files that already exist
-            overwrite: If True, overwrite existing files in S3
+            aws_profile: AWS profile name to use for credentials
+            region: AWS region for S3 operations
+            dry_run: If True, only simulates uploads without actual transfer
+            auto_detect_scope: If True, automatically detects scope from file path
+            skip_duplicates: If True, skips files that already exist in S3
+            overwrite: If True, overwrites existing files in S3
+            
+        Raises:
+            ConfigError: If scope is invalid when provided
+            
+        Side Effects:
+            - Initializes AWS session if not in dry_run mode
+            - Creates DuplicateDetector instance
         """
         self.scope = scope
         self.dry_run = dry_run
@@ -80,12 +130,23 @@ class Uploader:
         """
         Upload a single file with duplicate checking.
         
+        Processes a single file through the upload pipeline including scope
+        detection, duplicate checking, and actual upload with retry logic.
+        
         Args:
-            file_path: File to upload
-            input_dir: Base input directory (for scope detection)
+            file_path (Path): Absolute path to file to upload
+            input_dir (Path): Base input directory for relative path calculation
             
         Returns:
-            Tuple of (file_path, success, message)
+            Tuple[Path, bool, str]: A tuple containing:
+                - Path: The file path that was processed
+                - bool: True if successful (uploaded or skipped), False if failed
+                - str: Status message describing the outcome
+                
+        Side Effects:
+            - May upload file to S3
+            - Logs operation details
+            - Updates duplicate detector cache
         """
         # Determine scope for this file
         if self.auto_detect_scope:
@@ -171,13 +232,26 @@ class Uploader:
         """
         Upload multiple files in parallel with duplicate detection.
         
+        Orchestrates parallel upload of multiple files using ThreadPoolExecutor
+        for concurrent operations. Includes duplicate scanning before upload.
+        
         Args:
-            files: List of files to upload
-            input_dir: Base input directory
-            concurrency: Number of concurrent uploads
+            files (List[Path]): List of file paths to upload
+            input_dir (Path): Base directory for all files
+            concurrency (int): Number of concurrent upload workers
             
         Returns:
-            Statistics dictionary
+            dict: Statistics dictionary containing:
+                - total (int): Total number of files processed
+                - uploaded (int): Number of successfully uploaded files
+                - skipped (int): Number of files skipped (duplicates)
+                - failed (int): Number of failed uploads
+                - results (List[Tuple]): Detailed results for each file
+                
+        Side Effects:
+            - Uploads files to S3
+            - Logs duplicate detection results
+            - Updates progress indicators
         """
         uploaded = 0
         skipped = 0
@@ -244,11 +318,30 @@ def run_monolith(args: argparse.Namespace) -> int:
     """
     Run monolithic ingestion process with duplicate detection.
     
+    Main execution function for monolithic mode, handling the complete
+    upload pipeline from file discovery to final statistics reporting.
+    
     Args:
-        args: Parsed command line arguments
-        
+        args (argparse.Namespace): Parsed command line arguments containing:
+            - input (Path): Input directory to scan
+            - scope (Optional[str]): Upload scope
+            - include (Optional[str]): Extensions to include
+            - exclude (Optional[str]): Extensions to exclude
+            - concurrency (int): Number of parallel workers
+            - dry_run (bool): Dry run flag
+            - auto_detect_scope (bool): Auto-detection flag
+            - no_skip_duplicates (bool): Skip duplicate checking
+            - overwrite (bool): Overwrite existing files
+            - aws_profile (Optional[str]): AWS profile
+            - region (Optional[str]): AWS region
+            
     Returns:
-        Exit code (0 for success, 1 for failure)
+        int: Exit code (0 for success, 1 for any failures)
+        
+    Side Effects:
+        - Uploads files to S3
+        - Prints summary statistics to console
+        - Logs all operations
     """
     try:
         # Parse extension filters
@@ -330,11 +423,24 @@ def run_duplicate_check(args: argparse.Namespace) -> int:
     """
     Run duplicate checking without uploading.
     
+    Scans directories for duplicate files using hash comparison and
+    optionally checks against existing S3 objects.
+    
     Args:
-        args: Parsed command line arguments
-        
+        args (argparse.Namespace): Parsed arguments containing:
+            - input (Path): Directory to scan
+            - check_s3 (bool): Whether to check S3 for duplicates
+            - scope (Optional[str]): Scope for S3 checking
+            - aws_profile (Optional[str]): AWS profile
+            - region (Optional[str]): AWS region
+            
     Returns:
-        Exit code
+        int: Exit code (0 for success, 1 for errors)
+        
+    Side Effects:
+        - Prints duplicate report to console
+        - May query S3 for existing objects
+        - Updates duplicate detector cache
     """
     try:
         from MBA.services.duplicate_detector import DuplicateDetector
@@ -404,7 +510,23 @@ def run_duplicate_check(args: argparse.Namespace) -> int:
 
 
 def main():
-    """Main entry point for CLI with duplicate detection."""
+    """
+    Main entry point for CLI with duplicate detection.
+    
+    Parses command line arguments and routes to appropriate execution mode
+    (monolith, microservices, or duplicate check).
+    
+    Input:
+        Command line arguments from sys.argv
+        
+    Output:
+        Exit code to operating system
+        
+    Side Effects:
+        - Sets up root logger
+        - Executes chosen mode
+        - Exits process with appropriate code
+    """
     # Set up root logger
     setup_root_logger()
     

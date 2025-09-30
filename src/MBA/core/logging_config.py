@@ -1,12 +1,18 @@
 """
 Centralized logging configuration for the MBA ingestion system.
 
-Provides functions to:
-- Retrieve a standardized logger with console + rotating file handlers.
-- Configure the root logger for third-party libraries.
+Provides standardized logging setup with console and rotating file handlers,
+ensuring consistent log formatting across all modules.
 
-Log format includes timestamp, severity, module, function, line number,
-and message. Rotation ensures logs don’t grow indefinitely.
+Module Input:
+    - Logger name strings from calling modules
+    - Log messages from application code
+    - Configuration from settings module
+
+Module Output:
+    - Formatted log entries to console (stdout)
+    - Formatted log entries to rotating file (logs/app.log)
+    - Configured logger instances for modules
 """
 import logging
 import sys
@@ -23,12 +29,25 @@ _configured_loggers = set()
 def get_logger(name: str) -> logging.Logger:
     """
     Get or create a logger with standardized configuration.
-
+    
+    Creates a logger instance with both console and rotating file handlers,
+    using consistent formatting across the application. Prevents duplicate
+    handler configuration on repeated calls.
+    
     Args:
-        name: Logger name (typically `__name__` of the module).
-
+        name (str): Logger name, typically __name__ from calling module
+        
     Returns:
-        Configured logger instance with console and rotating file handlers.
+        logging.Logger: Configured logger instance ready for use
+        
+    Side Effects:
+        - Creates log directory if it doesn't exist
+        - Adds logger name to _configured_loggers set
+        - Creates handlers on first call for each logger
+        
+    Log Format:
+        "%(asctime)s | %(levelname)-8s | %(name)s:%(funcName)s:%(lineno)d | %(message)s"
+        Example: "2024-01-15 10:30:45 | INFO     | mba.cli:upload_single:145 | Upload complete"
     """
     # Check if logger already configured
     if name in _configured_loggers:
@@ -75,7 +94,22 @@ def get_logger(name: str) -> logging.Logger:
 
 
 def setup_root_logger():
-    """Configure the root logger for libraries that use it."""
+    """
+    Configure the root logger for libraries that use it.
+    
+    Sets up basic configuration for the root logger, which is inherited
+    by third-party libraries that don't explicitly configure their loggers.
+    
+    Input:
+        None (reads configuration from settings)
+        
+    Output:
+        None (configures logging.root)
+        
+    Side Effects:
+        - Configures root logger with basicConfig
+        - Sets format and level for all unconfigured loggers
+    """
     logging.basicConfig(
         level=settings.log_level,
         format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",

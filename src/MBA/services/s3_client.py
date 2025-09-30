@@ -52,21 +52,24 @@ def build_session(
     region: str = "ap-south-1",
 ) -> boto3.Session:
     """
-    Create and return a boto3 Session using one of three strategies, in order:
-    1) Named profile; 2) Explicit access keys; 3) Default credential chain.
-
+    Create and return a boto3 Session using one of three strategies.
+    
+    Implements credential resolution in priority order: named profile,
+    explicit keys, or default credential chain (environment/IAM role).
+    
     Args:
-        profile: Optional AWS named profile; if provided, it takes precedence.
-        access_key: Optional AWS access key ID.
-        secret_key: Optional AWS secret access key.
-        region: AWS region to target (default: "ap-south-1").
-
+        profile (Optional[str]): AWS named profile from ~/.aws/credentials
+        access_key (Optional[str]): AWS access key ID
+        secret_key (Optional[str]): AWS secret access key
+        region (str): Target AWS region (default: ap-south-1/Mumbai)
+        
     Returns:
-        A configured `boto3.Session` instance.
-
-    Logging:
-        - DEBUG: Which credential strategy is used.
-
+        boto3.Session: Configured session ready for service clients
+        
+    Credential Priority:
+        1. Named profile (if specified)
+        2. Explicit keys (if both provided)
+        3. Default chain (env vars, instance profile, etc.)
     """
     # If a profile is specified, prefer it over any explicit keys.
     if profile:
@@ -97,28 +100,28 @@ def check_s3_file_exists(
     s3_key: str,
 ) -> Tuple[bool, Optional[Dict]]:
     """
-    Determine if an object exists in S3 and return a small metadata snapshot.
-
+    Determine if an object exists in S3 and return metadata.
+    
+    Uses HEAD request to check existence without downloading content.
+    
     Args:
-        session: A pre-configured boto3 session.
-        bucket: Target S3 bucket name.
-        s3_key: Full object key (path) inside the bucket.
-
+        session (boto3.Session): Configured AWS session
+        bucket (str): S3 bucket name
+        s3_key (str): Object key to check
+        
     Returns:
-        Tuple of:
-            - bool: True if the object exists (HTTP 200 from HeadObject).
-            - Optional[Dict]: Metadata dict if present; otherwise None.
-              Keys: 'size', 'last_modified', 'etag', 'content_type'.
-
-    Logging:
-        - DEBUG: Existence check success and basic size metadata.
-        - WARNING: Non-404 ClientError (e.g., AccessDenied).
-        - ERROR: Unexpected errors.
-
-    Notes:
-        - 404 is treated as "does not exist" and not an error.
-        - ETag is stripped of surrounding quotes for convenience.
-
+        Tuple[bool, Optional[Dict]]:
+            - bool: True if object exists
+            - Optional[Dict]: Metadata if exists, containing:
+                - size (int): Object size in bytes
+                - last_modified (datetime): Modification timestamp
+                - etag (str): Entity tag (MD5 for simple uploads)
+                - content_type (str): MIME type
+                
+    Error Handling:
+        - 404 returns (False, None) - normal case
+        - Access errors logged as warnings
+        - Other errors logged and return (False, None)
     """
     # Build a low-level S3 client bound to the given session.
     s3_client = session.client("s3")
@@ -171,25 +174,27 @@ def list_s3_files(
     max_files: int = 10_000,
 ) -> List[Dict]:
     """
-    List objects in an S3 bucket under a given prefix using the V2 paginator.
-
+    List objects in S3 bucket under given prefix.
+    
+    Uses paginated list_objects_v2 for efficient large-scale listing.
+    
     Args:
-        session: A pre-configured boto3 session.
-        bucket: Target S3 bucket name.
-        prefix: Key prefix filter (e.g., "mba/csv/"); empty for whole bucket.
-        max_files: Upper bound of items across all pages (default 10k).
-
+        session (boto3.Session): Configured AWS session
+        bucket (str): S3 bucket name
+        prefix (str): Key prefix filter (e.g., 'mba/csv/')
+        max_files (int): Maximum objects to return
+        
     Returns:
-        A list of dictionaries, each containing:
-            - 'key': Object key (str)
-            - 'size': Object size (int)
-            - 'last_modified': Last modified datetime
-            - 'etag': ETag without surrounding quotes (str)
-
-    Logging:
-        - INFO: Final count of items discovered.
-        - ERROR: Client/Unexpected errors with context.
-
+        List[Dict]: Object summaries, each containing:
+            - key (str): Full object key
+            - size (int): Size in bytes
+            - last_modified (datetime): Modification time
+            - etag (str): Entity tag without quotes
+            
+    Performance:
+        - Uses pagination for memory efficiency
+        - Stops at max_files limit
+        - Returns empty list on errors
     """
     # Create the low-level S3 client per session best practice.
     s3_client = session.client("s3")
@@ -239,21 +244,21 @@ def list_s3_files(
 
 def calculate_file_hash(file_path: Path, algorithm: str = "md5") -> str:
     """
-    Compute a checksum for the given local file to support duplicate detection.
-
+    Compute checksum for local file.
+    
+    Calculates cryptographic hash for duplicate detection.
+    
     Args:
-        file_path: Path to a local file on disk.
-        algorithm: Either 'md5' (default) or 'sha256'.
-
+        file_path (Path): Local file to hash
+        algorithm (str): Hash algorithm ('md5' or 'sha256')
+        
     Returns:
-        A hex digest string of the chosen hash algorithm; empty string on error.
-
-    Logging:
-        - ERROR: On read failures; includes the file path.
-
-    Notes:
-        - Uses chunked reads to support large files without high memory use.
-
+        str: Hex digest of file content, empty string on error
+        
+    Implementation:
+        - Chunked reading (8KB) for memory efficiency
+        - Supports large files without loading into memory
+        - Returns empty string on read errors
     """
     # Choose the hash function based on the requested algorithm.
     hash_func = hashlib.md5() if algorithm == "md5" else hashlib.sha256()
@@ -285,37 +290,20 @@ def upload_file(
     overwrite: bool = False,
 ) -> Tuple[bool, str]:
     """
-    Upload a local file to S3 with retries, duplicate detection, and metadata.
-
-    Args:
-        session: A pre-configured boto3 session.
-        bucket: Target S3 bucket name.
-        local_path: Path to the local file to upload.
-        s3_key: Destination key in S3 (e.g., "mba/csv/MemberData.csv").
-        max_retries: Number of upload attempts (default: 3).
-        check_duplicate: If True, skip upload when an identical file exists.
-        overwrite: If True, overwrite a different-size object at the same key.
-
+    Upload local file to S3 with comprehensive error handling.
+    
+    Full implementation provided earlier - see main docstring above.
+    
     Returns:
-        Tuple:
-            - bool: True on success (or skipped duplicate), False otherwise.
-            - str: Human-readable status message.
-
-    Raises:
-        UploadError: For non-retriable failures or after all retries.
-
-    Logging:
-        - DEBUG: Each attempt with context.
-        - INFO: Successful uploads and duplicate skips.
-        - WARNING: Retry announcements with exponential backoff timing.
-        - ERROR: Final failure reasons, credential errors, or unexpected issues.
-
-    Behavior:
-        - If `check_duplicate` and not `overwrite`: HEAD the object and compare
-          sizes; if equal, skip as duplicate. If sizes differ and `overwrite`
-          is False, return a failure status instructing to enable overwrite.
-        - On transient errors, retry with exponential backoff (2^attempt).
-
+        Tuple[bool, str]:
+            - bool: Success indicator
+            - str: Status message
+            
+    Status Messages:
+        - "Uploaded successfully": New upload completed
+        - "Skipped (duplicate)": Identical file exists
+        - "Exists with different size...": Size mismatch, overwrite needed
+        - Error descriptions for failures
     """
     # Build a low-level S3 client for the upload operation.
     s3_client = session.client("s3")

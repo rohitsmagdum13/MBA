@@ -1,15 +1,19 @@
 """
 Duplicate file detection for local and S3 storage.
 
-This module provides functionality to:
-- Detect duplicate files in local directories by computing file hashes.
-- Maintain a cache of hashes to avoid recomputation.
-- Check if a file already exists in S3 (duplicate check).
-- Find similar S3 files by name or size.
-- Generate human-readable reports of duplicate groups.
+Provides hash-based duplicate detection with caching for performance
+and comprehensive reporting capabilities.
 
-It supports both local filesystem and AWS S3 for duplication detection.
-Detailed logging and exception handling are included for reliability.
+Module Input:
+    - Local file paths for scanning
+    - S3 coordinates for comparison
+    - Cache file for persistence
+
+Module Output:
+    - Hash-to-files mapping
+    - Duplicate groups
+    - Similarity reports
+    - Cache updates
 """
 
 import json
@@ -30,8 +34,13 @@ class DuplicateDetector:
     """
     Handles duplicate detection for files in both local storage and S3.
     
-    Provides methods to scan directories, compare hashes, check S3 existence,
-    and produce reports.
+    Implements efficient duplicate detection using MD5 hashing with
+    persistent caching and detailed reporting capabilities.
+    
+    Attributes:
+        cache_file (Path): Path to JSON cache file
+        local_cache (Dict[str, Dict]): Local file hash cache
+        s3_cache (Dict[str, Dict]): S3 object hash cache
     """
 
     def __init__(self, cache_file: Optional[Path] = None) -> None:
@@ -93,13 +102,24 @@ class DuplicateDetector:
     def scan_local_directory(self, directory: Path, recursive: bool = True) -> Dict[str, List[Path]]:
         """
         Scan a local directory and group files by hash.
-
+        
+        Recursively scans directory structure, computing hashes for all
+        files and grouping duplicates by content hash.
+        
         Args:
-            directory: Directory to scan.
-            recursive: If True, search subdirectories recursively.
-
+            directory (Path): Root directory to scan
+            recursive (bool): Whether to scan subdirectories
+            
         Returns:
-            Dictionary mapping file hash to list of file paths.
+            Dict[str, List[Path]]: Mapping of hash to file paths
+                Key: MD5 hash string
+                Value: List of paths with that hash
+                
+        Side Effects:
+            - Reads all files in directory tree
+            - Updates local cache
+            - Saves cache to disk
+            - Logs duplicate groups found
         """
         hash_to_files: Dict[str, List[Path]] = {}
 
@@ -200,17 +220,24 @@ class DuplicateDetector:
     ) -> Tuple[bool, Optional[Dict]]:
         """
         Check if a local file already exists in S3.
-
+        
+        Compares local file against S3 object using size as a quick
+        proxy for content equality.
+        
         Args:
-            session: Boto3 session.
-            local_path: Local file path.
-            bucket: Target S3 bucket.
-            s3_key: S3 key to check.
-
+            session (boto3.Session): AWS session for S3 access
+            local_path (Path): Local file to check
+            bucket (str): S3 bucket to check against
+            s3_key (str): S3 key to check
+            
         Returns:
-            Tuple (is_duplicate, metadata) where:
-              - is_duplicate: True if duplicate found.
-              - metadata: S3 metadata if found, else None.
+            Tuple[bool, Optional[Dict]]: 
+                - bool: True if duplicate found
+                - Optional[Dict]: S3 metadata if object exists
+                
+        Side Effects:
+            - Makes HEAD request to S3
+            - Updates S3 cache
         """
         exists, metadata = check_s3_file_exists(session, bucket, s3_key)
 
@@ -269,14 +296,23 @@ class DuplicateDetector:
 
     def generate_report(self, duplicates: Dict[str, List[Path]], base_dir: Optional[Path] = None) -> str:
         """
-        Generate a formatted duplicate detection report.
-
+        Generate formatted duplicate detection report.
+        
+        Creates human-readable report showing duplicate groups with
+        file details and recommendations.
+        
         Args:
-            duplicates: Dictionary mapping hash -> duplicate file list.
-            base_dir: Optional base directory for relative paths.
-
+            duplicates (Dict[str, List[Path]]): Hash to paths mapping
+            base_dir (Optional[Path]): Base for relative path display
+            
         Returns:
-            Formatted string report.
+            str: Formatted multi-line report text
+            
+        Report Includes:
+            - Total duplicate count
+            - Number of duplicate groups
+            - File details (size, modification time)
+            - Oldest file identification
         """
         lines: List[str] = ["=" * 50, "Duplicate Detection Report", "=" * 50]
 

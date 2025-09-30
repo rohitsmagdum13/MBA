@@ -1,6 +1,21 @@
 """
-MBA S3 Data Ingestion - Streamlit UI
-Beautiful and feature-rich interface for file upload management
+MBA S3 Data Ingestion - Streamlit UI.
+
+Interactive web interface for file upload management with real-time
+monitoring, analytics, and database browsing capabilities.
+
+Module Input:
+    - User interactions via web browser
+    - Local files for upload
+    - Configuration via sidebar
+    - Database queries for monitoring
+
+Module Output:
+    - Web-based user interface
+    - File uploads to S3
+    - Real-time statistics and charts
+    - Database query results
+    - Export configurations
 """
 import streamlit as st
 import pandas as pd
@@ -204,7 +219,19 @@ class UploadJob:
     timestamp: datetime
 
 class StreamlitUploader:
-    """Wrapper for upload functionality with Streamlit progress tracking"""
+    """
+    Wrapper for upload functionality with Streamlit progress tracking.
+    
+    Bridges the CLI uploader with Streamlit's progress indicators for
+    real-time upload status in the web interface.
+    
+    Attributes:
+        uploader (Uploader): Core upload instance
+        progress_bar: Streamlit progress widget
+        status_text: Streamlit status text widget
+        current_file (int): Current file index
+        total_files (int): Total files to process
+    """
     
     def __init__(self, uploader: Uploader, progress_bar=None, status_text=None):
         self.uploader = uploader
@@ -214,7 +241,28 @@ class StreamlitUploader:
         self.total_files = 0
     
     def upload_batch_with_progress(self, files: List[Path], input_dir: Path, concurrency: int = 4):
-        """Upload files with progress tracking"""
+        """
+        Upload files with visual progress tracking.
+        
+        Wraps batch upload with Streamlit progress updates.
+        
+        Args:
+            files (List[Path]): Files to upload
+            input_dir (Path): Base directory
+            concurrency (int): Parallel upload workers
+            
+        Returns:
+            dict: Upload results containing:
+                - uploaded (int): Success count
+                - skipped (int): Duplicate count
+                - failed (int): Failure count
+                - details (List[UploadJob]): Per-file details
+                
+        Side Effects:
+            - Updates progress bar widget
+            - Updates status text widget
+            - Adds to session state history
+        """
         self.total_files = len(files)
         results = {
             'uploaded': 0,
@@ -264,7 +312,14 @@ class StreamlitUploader:
         return results
 
 def render_header():
-    """Render the application header"""
+    """
+    Render application header with branding.
+    
+    Creates centered header with gradient styling and tagline.
+    
+    Output:
+        HTML-styled header in Streamlit interface
+    """
     col1, col2, col3 = st.columns([1, 2, 1])
     
     with col2:
@@ -284,7 +339,18 @@ def render_header():
         """, unsafe_allow_html=True)
 
 def render_metrics():
-    """Render metrics dashboard"""
+    """
+    Render metrics dashboard with key statistics.
+    
+    Displays four metric cards showing upload statistics with
+    gradient backgrounds and formatted values.
+    
+    Metrics Displayed:
+        - Files Uploaded: Total successful uploads
+        - Duplicates Skipped: Files avoided due to duplication
+        - Failed Uploads: Error count
+        - Total Size: Cumulative data volume in MB
+    """
     col1, col2, col3, col4 = st.columns(4)
     
     stats = st.session_state.upload_stats
@@ -414,7 +480,23 @@ def render_sidebar():
     }
 
 def render_file_discovery_tab():
-    """Render file discovery and selection tab"""
+    """
+    Render file discovery and selection interface.
+    
+    Provides directory scanning, file filtering, and selection
+    controls for choosing files to upload.
+    
+    Interface Elements:
+        - Directory input field
+        - Scope filter dropdown
+        - Scan button
+        - File type distribution chart
+        - File selection checkboxes
+        
+    Side Effects:
+        - Updates session state with discovered files
+        - Triggers directory scanning
+    """
     st.markdown("### 📁 File Discovery")
     
     col1, col2, col3 = st.columns([2, 1, 1])
@@ -513,7 +595,24 @@ def scan_directory(input_dir: str, scope_filter: str):
         st.error(f"Error scanning directory: {e}")
 
 def render_duplicate_detection_tab():
-    """Render duplicate detection tab"""
+    """
+    Render duplicate detection interface.
+    
+    Scans for duplicate files locally and optionally in S3,
+    presenting results with actionable options.
+    
+    Features:
+        - Local duplicate scanning
+        - S3 comparison (optional)
+        - Duplicate group display
+        - Space waste calculation
+        - Delete suggestions
+        
+    Output:
+        - Duplicate statistics
+        - Grouped duplicate listings
+        - Space savings potential
+    """
     st.markdown("### 🔍 Duplicate Detection")
     
     col1, col2 = st.columns([3, 1])
@@ -622,7 +721,25 @@ def scan_for_duplicates(scan_dir: str, check_s3: bool):
         st.error(f"Error scanning for duplicates: {e}")
 
 def render_upload_tab(config: dict):
-    """Render upload tab"""
+    """
+    Render file upload interface.
+    
+    Main upload control panel with options and history.
+    
+    Args:
+        config (dict): Configuration from sidebar
+        
+    Interface:
+        - Upload options (dry run, scope)
+        - Start upload button
+        - Progress indicators
+        - Upload history display
+        
+    Side Effects:
+        - Initiates file uploads
+        - Updates session state
+        - Refreshes metrics
+    """
     st.markdown("### 📤 Upload Files")
     
     if not st.session_state.selected_files:
@@ -751,7 +868,21 @@ def perform_upload(config: dict, dry_run: bool, selected_scope: str):
         logger.error(f"Upload error: {e}", exc_info=True)
 
 def render_s3_browser_tab():
-    """Render S3 browser tab"""
+    """
+    Render S3 bucket browser interface.
+    
+    Lists and displays S3 bucket contents with filtering.
+    
+    Features:
+        - Bucket selection
+        - Prefix filtering
+        - Table/card view toggle
+        - File statistics
+        - Metadata display
+        
+    Data Source:
+        S3 LIST operations via boto3
+    """
     st.markdown("### 🗂️ S3 Browser")
     
     col1, col2, col3 = st.columns([2, 2, 1])
@@ -872,7 +1003,21 @@ def list_s3_contents(bucket_type: str, prefix: str):
         st.session_state.s3_contents = []
 
 def render_analytics_tab():
-    """Render analytics and insights tab"""
+    """
+    Render analytics and insights dashboard.
+    
+    Visualizes upload trends and performance metrics.
+    
+    Charts:
+        - Daily upload trends
+        - Hourly activity distribution
+        - Success rate over time
+        - File type distribution
+        - Performance metrics
+        
+    Data Source:
+        Session state upload history
+    """
     st.markdown("### 📊 Analytics & Insights")
     
     # Date range selector
@@ -1018,7 +1163,22 @@ def render_analytics_tab():
         st.metric("Error Rate", f"{error_rate:.1f}%", "↓ 0.2%")
 
 def render_settings_tab():
-    """Render settings and configuration tab"""
+    """
+    Render settings and configuration interface.
+    
+    Manages application settings and cache.
+    
+    Features:
+        - Cache management
+        - Configuration export/import
+        - Advanced settings
+        - Logging configuration
+        
+    Side Effects:
+        - Modifies application settings
+        - Clears cache files
+        - Exports/imports configurations
+    """
     st.markdown("### ⚙️ Settings & Configuration")
     
     # Cache management
@@ -1188,7 +1348,21 @@ def _table_count(table: str) -> int:
 # _table_count("your_table_name")
         return 0
 def render_db_browser_tab():
-    """Render a read-only DB Browser tab for RDS (MySQL)."""
+    """
+    Render database browser for RDS MySQL.
+    
+    Read-only interface for viewing database contents and
+    audit trails.
+    
+    Displays:
+        - Table row counts
+        - Recent audit entries
+        - Query results
+        - CSV preview capability
+        
+    Security:
+        Read-only queries only, no data modification
+    """
     st.markdown("### 🧭 DB Browser (Read-only)")
 
     # Refresh + connectivity check
@@ -1287,7 +1461,25 @@ def render_db_browser_tab():
 
 
 def main():
-    """Main application entry point"""
+    """
+    Main Streamlit application entry point.
+    
+    Orchestrates the complete web interface with tabbed navigation
+    and sidebar configuration.
+    
+    Application Structure:
+        - Header with branding
+        - Metrics dashboard
+        - Sidebar configuration
+        - Seven functional tabs
+        - Footer with version info
+        
+    Session State Management:
+        - upload_history: List of completed uploads
+        - duplicate_scan_results: Latest scan results
+        - selected_files: Files chosen for upload
+        - upload_stats: Aggregate statistics
+    """
     # Render header
     render_header()
     

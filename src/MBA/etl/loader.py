@@ -1,10 +1,18 @@
 """
-loader.py
-CsvToMySQLLoader:
-- Downloads S3 object
-- Computes MD5 + size
-- Writes audit: STARTED → SUCCESS/FAILED
-- Infers schema, creates table, bulk-inserts rows
+CSV to MySQL ETL loader with schema inference and auditing.
+
+Orchestrates the complete ETL pipeline from S3 download through
+schema creation to data loading with comprehensive audit trail.
+
+Module Input:
+    - S3 object coordinates (bucket, key)
+    - Batch size configuration
+    - AWS S3 client
+
+Module Output:
+    - Loaded data in MySQL tables
+    - Audit records
+    - Load statistics
 """
 
 from __future__ import annotations
@@ -33,9 +41,27 @@ class LoadResult:
     audit_id: str | None = None
 
 class CsvToMySQLLoader:
-    """End-to-end ETL for a single CSV S3 object into MySQL with auditing."""
+    """
+    End-to-end ETL for a single CSV S3 object into MySQL.
+    
+    Manages the complete pipeline including download, schema inference,
+    table creation, data transformation, and bulk loading with audit.
+    
+    Attributes:
+        s3 (boto3.client): S3 client for object operations
+        bucket (str): Source S3 bucket
+        key (str): Source S3 object key
+    """
 
     def __init__(self, s3: boto3.client, bucket: str, key: str):
+        """
+        Initialize loader with S3 coordinates.
+        
+        Args:
+            s3 (boto3.client): Configured S3 client
+            bucket (str): S3 bucket name
+            key (str): S3 object key
+        """
         self.s3 = s3
         self.bucket = bucket
         self.key = key
@@ -60,7 +86,31 @@ class CsvToMySQLLoader:
         return h.hexdigest()
 
     def run(self, batch_size: int = 2000) -> LoadResult:
-        """Execute ETL and write audit rows."""
+        """
+        Execute complete ETL pipeline with auditing.
+        
+        Downloads CSV from S3, infers schema, creates table, transforms
+        data, and loads into MySQL with full audit trail.
+        
+        Args:
+            batch_size (int): Number of rows per insert batch
+            
+        Returns:
+            LoadResult: Dataclass containing:
+                - table (str): Created table name
+                - delimiter (str): Detected CSV delimiter
+                - rows_inserted (int): Total rows loaded
+                - audit_id (Optional[str]): Audit trail UUID
+                
+        Raises:
+            Exception: On ETL failure (after audit record)
+            
+        Side Effects:
+            - Downloads S3 object
+            - Creates/updates MySQL table
+            - Inserts data rows
+            - Creates audit records
+        """
         t0 = time.time()
 
         # 1) Fetch file

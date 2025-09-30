@@ -1,4 +1,17 @@
-"""Simple in-memory queue for job processing."""
+"""
+Simple in-memory queue for job processing.
+
+Thread-safe job queue implementation for microservices mode.
+
+Module Input:
+    - Job objects for enqueueing
+    - Worker requests for jobs
+
+Module Output:
+    - Job objects for processing
+    - Queue statistics
+    - Completion signals
+"""
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,7 +26,17 @@ logger = get_logger(__name__)
 
 @dataclass
 class Job:
-    """Represents a file upload job."""
+    """
+    Represents a file upload job.
+    
+    Encapsulates all information needed to upload a file to S3.
+    
+    Attributes:
+        path (Path): Local file path to upload
+        scope (str): Data scope ('mba' or 'policy')
+        s3_key (str): Target S3 object key
+        bucket (str): Target S3 bucket name
+    """
     path: Path          # Local file path
     scope: str          # "mba" or "policy"
     s3_key: str        # Target S3 key
@@ -24,7 +47,18 @@ class Job:
 
 
 class JobQueue:
-    """Thread-safe in-memory job queue."""
+    """
+    Thread-safe in-memory job queue.
+    
+    Implements a producer-consumer queue pattern for distributing
+    upload jobs across multiple workers.
+    
+    Attributes:
+        _queue (Queue): Internal thread-safe queue
+        _lock (threading.Lock): Synchronization for statistics
+        _processed_count (int): Successfully processed jobs
+        _failed_count (int): Failed job count
+    """
     
     def __init__(self, maxsize: int = 0):
         """
@@ -39,19 +73,33 @@ class JobQueue:
         self._failed_count = 0
         
     def put(self, job: Job) -> None:
-        """Add job to queue."""
+        """
+        Add job to queue.
+        
+        Args:
+            job (Job): Job to enqueue
+            
+        Side Effects:
+            - Adds job to internal queue
+            - Logs enqueue operation
+        """
         logger.debug(f"Enqueueing job: {job}")
         self._queue.put(job)
         
     def get(self, timeout: Optional[float] = None) -> Optional[Job]:
         """
-        Get job from queue.
+        Get job from queue with optional timeout.
         
         Args:
-            timeout: Wait timeout in seconds (None for blocking)
+            timeout (Optional[float]): Wait timeout in seconds
             
         Returns:
-            Job if available, None if timeout
+            Optional[Job]: Job if available, None on timeout
+            
+        Blocking Behavior:
+            - timeout=None: Block until job available
+            - timeout=0: Non-blocking
+            - timeout>0: Wait up to timeout seconds
         """
         try:
             job = self._queue.get(timeout=timeout)
@@ -80,7 +128,19 @@ class JobQueue:
         return self._queue.empty()
         
     def stats(self) -> dict:
-        """Get queue statistics."""
+        """
+        Get queue statistics.
+        
+        Returns:
+            dict: Statistics containing:
+                - queued (int): Current queue size
+                - processed (int): Completed jobs
+                - failed (int): Failed jobs
+                - total (int): Sum of all categories
+                
+        Thread Safety:
+            Uses lock for consistent snapshot
+        """
         with self._lock:
             return {
                 "queued": self.size(),

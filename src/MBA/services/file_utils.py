@@ -1,15 +1,20 @@
 """
 File discovery and processing utilities.
 
-This module provides helper functions to:
-- Recursively discover files in a directory.
-- Detect file type based on extension.
-- Detect scope (mba/policy) from path.
-- Build structured S3 object keys.
-- Parse file extension filters.
+Provides filesystem scanning, type detection, and S3 key generation
+utilities for the ingestion pipeline.
 
-Logging is used for detailed insights, and exceptions are raised
-with context when discovery fails.
+Module Input:
+    - Directory paths to scan
+    - File paths for analysis
+    - Extension filters
+    - Scope identifiers
+
+Module Output:
+    - Lists of discovered files
+    - File type categories
+    - S3 key strings
+    - Scope detection results
 """
 
 from pathlib import Path
@@ -55,18 +60,28 @@ def discover_files(
 ) -> List[Path]:
     """
     Recursively discover files in a directory with optional filtering.
-
+    
+    Scans directory tree applying extension and scope filters to build
+    a list of files for processing.
+    
     Args:
-        input_dir: Directory to scan.
-        include_extensions: If provided, only include these extensions.
-        exclude_extensions: If provided, exclude these extensions.
-        scope: Optional scope subdirectory ("mba" or "policy").
-
+        input_dir (Path): Root directory to scan
+        include_extensions (Optional[Set[str]]): Extensions to include (e.g., {'.pdf', '.csv'})
+        exclude_extensions (Optional[Set[str]]): Extensions to exclude
+        scope (Optional[str]): Scope subdirectory to focus on ('mba' or 'policy')
+        
     Returns:
-        List of discovered file paths.
-
+        List[Path]: List of discovered file paths matching criteria
+        
     Raises:
-        FileDiscoveryError: If directory doesn't exist or is invalid.
+        FileDiscoveryError: If directory doesn't exist or is inaccessible
+        
+    Side Effects:
+        - Traverses filesystem
+        - Logs discovery progress
+        
+    Example:
+        files = discover_files(Path('./data'), include_extensions={'.csv'})
     """
     # Validate that the path exists and is a directory
     if not input_dir.exists():
@@ -129,12 +144,21 @@ def discover_files(
 def detect_file_type(file_path: Path) -> str:
     """
     Detect file type category based on extension.
-
+    
+    Maps file extensions to logical categories for S3 organization.
+    
     Args:
-        file_path: Path to file.
-
+        file_path (Path): File path to analyze
+        
     Returns:
-        File type category (e.g., "pdf", "image", "other").
+        str: Category name ('pdf', 'csv', 'image', 'text', 'other')
+        
+    Mapping:
+        - .pdf -> 'pdf'
+        - .png, .jpg, .jpeg -> 'image'
+        - .csv -> 'csv'
+        - .txt, .log, .md -> 'text'
+        - unknown -> 'other'
     """
     extension = file_path.suffix.lower()
     file_type = FILE_TYPE_MAPPING.get(extension, "other")
@@ -144,14 +168,22 @@ def detect_file_type(file_path: Path) -> str:
 
 def detect_scope_from_path(file_path: Path, input_dir: Path) -> Optional[str]:
     """
-    Detect scope ("mba" or "policy") from file path relative to input_dir.
-
+    Detect scope ('mba' or 'policy') from file path.
+    
+    Analyzes path components to determine data scope based on
+    directory structure conventions.
+    
     Args:
-        file_path: Path to file.
-        input_dir: Base input directory.
-
+        file_path (Path): File path to analyze
+        input_dir (Path): Base directory for relative path calculation
+        
     Returns:
-        Scope if detected, None otherwise.
+        Optional[str]: 'mba' or 'policy' if detected, None otherwise
+        
+    Detection Logic:
+        1. Check relative path components for 'mba' or 'policy'
+        2. Check parent directory names
+        3. Return None if no scope indicator found
     """
     try:
         relative_path = file_path.relative_to(input_dir)
@@ -177,15 +209,21 @@ def detect_scope_from_path(file_path: Path, input_dir: Path) -> Optional[str]:
 def build_s3_key(scope: str, file_path: Path, prefix: str = "", auto_detect_type: bool = True) -> str:
     """
     Build structured S3 object key.
-
+    
+    Constructs S3 key with scope, type categorization, and filename.
+    
     Args:
-        scope: "mba" or "policy".
-        file_path: Local file path.
-        prefix: Optional prefix (defaults to scope).
-        auto_detect_type: If True, include file type category in key.
-
+        scope (str): Data scope ('mba' or 'policy')
+        file_path (Path): Source file path
+        prefix (str): Optional prefix override (defaults to scope)
+        auto_detect_type (bool): Whether to include type in path
+        
     Returns:
-        S3 object key string.
+        str: S3 key string (e.g., 'mba/csv/data.csv')
+        
+    Key Structure:
+        - With type detection: {prefix}/{type}/{filename}
+        - Without type detection: {prefix}/{filename}
     """
     base_prefix = prefix or f"{scope}/"
     if not base_prefix.endswith("/"):
@@ -203,13 +241,20 @@ def build_s3_key(scope: str, file_path: Path, prefix: str = "", auto_detect_type
 
 def parse_extensions(extensions_str: str) -> Set[str]:
     """
-    Parse comma-separated extensions into a normalized set.
-
+    Parse comma-separated extensions into normalized set.
+    
+    Converts user input string to set of normalized extensions.
+    
     Args:
-        extensions_str: e.g. "pdf,csv,docx".
-
+        extensions_str (str): Comma-separated extensions (e.g., 'pdf,csv,docx')
+        
     Returns:
-        Set of normalized extensions with leading dot.
+        Set[str]: Normalized extensions with dots (e.g., {'.pdf', '.csv', '.docx'})
+        
+    Normalization:
+        - Adds leading dot if missing
+        - Converts to lowercase
+        - Strips whitespace
     """
     if not extensions_str:
         return set()

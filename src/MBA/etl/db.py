@@ -1,7 +1,19 @@
 """
-db.py
-RDS/MySQL engine factory + small helpers using SQLAlchemy.
-Improved version with better error handling and logging.
+RDS/MySQL engine factory and database helpers using SQLAlchemy.
+
+Manages database connections with automatic database creation, connection
+pooling, and retry logic.
+
+Module Input:
+    - Database configuration from settings
+    - SQL statements and parameters
+    - Row data for bulk inserts
+
+Module Output:
+    - SQLAlchemy Engine instances
+    - Database connections
+    - Query results
+    - Health check status
 """
 
 from __future__ import annotations
@@ -74,8 +86,24 @@ def _create_database_if_not_exists(url: str, dbname: str) -> bool:
 
 def get_engine() -> Engine:
     """
-    Return SQLAlchemy Engine with improved error handling and logging.
-    Automatically creates database if it doesn't exist.
+    Return SQLAlchemy Engine with automatic database creation.
+    
+    Singleton pattern implementation that creates database if needed
+    and manages connection pool for MySQL.
+    
+    Input:
+        None (uses global settings)
+        
+    Returns:
+        Engine: Configured SQLAlchemy engine instance
+        
+    Raises:
+        DatabaseError: If unable to connect to MySQL server
+        
+    Side Effects:
+        - Creates database if it doesn't exist
+        - Caches engine globally
+        - Tests connection on first call
     """
     global _engine
     if _engine is not None:
@@ -137,7 +165,22 @@ def get_engine() -> Engine:
 
 @contextmanager
 def connect() -> Generator[Connection, None, None]:
-    """Context manager for database connections with retry logic."""
+    """
+    Context manager for database connections with retry logic.
+    
+    Provides automatic connection management with retry on transient
+    failures and proper cleanup.
+    
+    Yields:
+        Connection: Active database connection
+        
+    Raises:
+        Exception: After exhausting retry attempts
+        
+    Usage:
+        with connect() as conn:
+            result = conn.execute(text("SELECT * FROM table"))
+    """
     max_retries = 3
     retry_delay = 1  # seconds
     
@@ -160,7 +203,23 @@ def connect() -> Generator[Connection, None, None]:
             time.sleep(retry_delay)
 
 def exec_sql(sql: str, params: Mapping[str, Any] | None = None) -> None:
-    """Execute SQL with improved error handling."""
+    """
+    Execute SQL statement with error handling.
+    
+    Executes DDL or DML statements with automatic commit and timing.
+    
+    Args:
+        sql (str): SQL statement to execute
+        params (Optional[Mapping[str, Any]]): Named parameters for SQL
+        
+    Side Effects:
+        - Executes SQL in database
+        - Commits transaction
+        - Logs execution time
+        
+    Raises:
+        Exception: On SQL execution failure
+    """
     logger.debug("Executing SQL: %s", sql[:100] + "..." if len(sql) > 100 else sql)
     start_time = time.time()
     
@@ -178,7 +237,23 @@ def exec_sql(sql: str, params: Mapping[str, Any] | None = None) -> None:
         raise
 
 def bulk_insert(table: str, rows: Iterable[Mapping[str, Any]]) -> int:
-    """Bulk insert with improved logging and error handling."""
+    """
+    Perform bulk insert with improved logging.
+    
+    Efficiently inserts multiple rows in a single transaction.
+    
+    Args:
+        table (str): Target table name
+        rows (Iterable[Mapping[str, Any]]): Row data as dictionaries
+        
+    Returns:
+        int: Number of rows inserted
+        
+    Side Effects:
+        - Inserts rows into database
+        - Commits transaction
+        - Logs operation metrics
+    """
     rows = list(rows)
     if not rows:
         logger.debug("No rows to insert into table '%s'", table)
@@ -207,7 +282,19 @@ def bulk_insert(table: str, rows: Iterable[Mapping[str, Any]]) -> int:
         raise
 
 def health_check() -> dict:
-    """Database health check for monitoring."""
+    """
+    Database health check for monitoring.
+    
+    Tests database connectivity and returns status information.
+    
+    Returns:
+        dict: Health status containing:
+            - status (str): "healthy" or "unhealthy"
+            - response_time_ms (float): Query response time
+            - database (str): Database name
+            - host (str): Database host
+            - error (Optional[str]): Error message if unhealthy
+    """
     try:
         start_time = time.time()
         with connect() as conn:

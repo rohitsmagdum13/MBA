@@ -1,6 +1,20 @@
 """
-csv_ingest_lambda.py
-AWS Lambda entrypoint for S3 → RDS ETL with improved error handling and logging.
+AWS Lambda handler for S3 to RDS ETL with comprehensive error handling.
+
+Processes S3 event notifications to load CSV files into MySQL RDS
+with detailed logging and multi-status responses.
+
+Module Input (Lambda Event):
+    - S3 event records with bucket and key information
+    - Lambda context with request ID and resource limits
+
+Module Output (Lambda Response):
+    dict containing:
+        - statusCode: HTTP status (200 success, 207 partial, 500 error)
+        - request_id: Lambda invocation ID
+        - summary: Processing statistics
+        - results: Per-file processing details
+        - database_info: Connection metadata
 """
 
 from __future__ import annotations
@@ -22,7 +36,41 @@ logger = get_logger(__name__)
 
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
-    Lambda handler for S3 events with comprehensive error handling and logging.
+    Lambda handler for S3 events with comprehensive error handling.
+    
+    Processes S3 PUT events to load CSV files into RDS MySQL with
+    full audit trail and detailed error reporting.
+    
+    Args:
+        event (Dict[str, Any]): S3 event containing:
+            - Records: List of S3 event records
+            - Each record contains s3.bucket.name and s3.object.key
+            
+        context (Any): Lambda context with:
+            - aws_request_id: Unique invocation ID
+            - memory_limit_in_mb: Allocated memory
+            - get_remaining_time_in_millis(): Time before timeout
+            
+    Returns:
+        Dict[str, Any]: Response containing:
+            - statusCode (int): 200 (success), 207 (partial), 500 (error)
+            - request_id (str): Lambda invocation ID for tracing
+            - summary (dict): Aggregate statistics
+            - results (List[dict]): Per-file processing details
+            - database_info (dict): RDS connection information
+            
+    Side Effects:
+        - Downloads CSV files from S3
+        - Creates/updates MySQL tables
+        - Loads data into RDS
+        - Creates audit records
+        - Logs all operations
+            
+    Error Handling:
+        - Validates database connectivity before processing
+        - Skips non-CSV files
+        - Continues processing on individual file failures
+        - Returns detailed error information per file
     """
     request_id = getattr(context, 'aws_request_id', 'unknown')
     logger.info("Lambda started - Request ID: %s", request_id)

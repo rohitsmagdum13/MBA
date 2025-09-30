@@ -1,12 +1,18 @@
 """
 Centralized configuration management using Pydantic.
 
-This module defines the `Settings` class, which loads application
-configuration from environment variables or a `.env` file. It supports
-AWS, S3, database, and logging configuration.
+This module defines the Settings class which loads and validates application
+configuration from environment variables or .env file.
 
-Helper methods provide validated access to S3 bucket/prefix and
-generate SQLAlchemy database URLs.
+Module Input:
+    - Environment variables from OS
+    - .env file in project root (optional)
+    - Default values defined in class
+
+Module Output:
+    - Validated configuration object (singleton)
+    - Helper methods for bucket/prefix resolution
+    - Database connection strings
 """
 
 from __future__ import annotations
@@ -19,7 +25,41 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """Application settings loaded from environment variables and `.env` file."""
+    """
+    Application settings loaded from environment variables and .env file.
+    
+    Uses Pydantic's BaseSettings to provide validated configuration with
+    automatic type conversion and environment variable loading. Supports
+    both development (.env file) and production (environment variables)
+    configuration methods.
+    
+    Attributes:
+        AWS Configuration:
+            aws_access_key_id (Optional[str]): AWS access key for API calls
+            aws_secret_access_key (Optional[str]): AWS secret key
+            aws_default_region (str): Default AWS region (default: "us-east-1")
+            aws_profile (Optional[str]): Named AWS profile to use
+            
+        S3 Configuration:
+            s3_bucket_mba (str): S3 bucket for MBA data files
+            s3_bucket_policy (str): S3 bucket for policy documents
+            s3_prefix_mba (str): Key prefix for MBA files (must end with /)
+            s3_prefix_policy (str): Key prefix for policy files (must end with /)
+            s3_sse (str): Server-side encryption type (default: "AES256")
+            
+        Database Configuration:
+            RDS_HOST (str): MySQL RDS endpoint hostname
+            RDS_PORT (int): MySQL port (default: 3306)
+            RDS_DATABASE (str): Database name
+            RDS_USERNAME (str): Database user
+            RDS_PASSWORD (str): Database password
+            RDS_params (str): Additional connection parameters
+            
+        Logging Configuration:
+            log_level (str): Minimum log level (default: "INFO")
+            log_dir (Path): Directory for log files (default: "logs")
+            log_file (str): Log file name (default: "app.log")
+    """
 
     # ---------------- AWS Configuration ----------------
     aws_access_key_id: Optional[str] = None
@@ -63,15 +103,17 @@ class Settings(BaseSettings):
     def get_bucket(self, scope: str) -> str:
         """
         Get bucket name for given scope.
-
+        
+        Maps scope identifier to corresponding S3 bucket name.
+        
         Args:
-            scope: "mba" or "policy".
-
+            scope (str): Scope identifier ("mba" or "policy")
+            
         Returns:
-            Corresponding bucket name.
-
+            str: S3 bucket name for the scope
+            
         Raises:
-            ValueError: If scope is invalid.
+            ValueError: If scope is not "mba" or "policy"
         """
         s = scope.strip().lower()
         if s == "mba":
@@ -83,12 +125,17 @@ class Settings(BaseSettings):
     def get_prefix(self, scope: str) -> str:
         """
         Get S3 prefix for given scope.
-
+        
+        Maps scope identifier to corresponding S3 key prefix.
+        
         Args:
-            scope: "mba" or "policy".
-
+            scope (str): Scope identifier ("mba" or "policy")
+            
         Returns:
-            Corresponding S3 prefix (always ends with '/').
+            str: S3 prefix ending with '/'
+            
+        Raises:
+            ValueError: If scope is not "mba" or "policy"
         """
         s = scope.strip().lower()
         if s == "mba":
@@ -98,7 +145,24 @@ class Settings(BaseSettings):
         raise ValueError(f"Invalid scope: {scope}")
     
     def db_url(self) -> str:
-        """Generate MySQL connection URL from RDS settings with proper validation."""
+        """
+        Generate MySQL connection URL from RDS settings.
+        
+        Constructs a SQLAlchemy-compatible database URL with proper
+        encoding of special characters in passwords.
+        
+        Input:
+            None (uses instance attributes)
+            
+        Returns:
+            str: Complete MySQL connection URL
+            
+        Raises:
+            ValueError: If required database settings are missing
+            
+        Example Output:
+            "mysql+pymysql://user:pass%40word@host:3306/database?charset=utf8mb4"
+        """
         host = self.RDS_HOST
         port = self.RDS_PORT
         name = self.RDS_DATABASE

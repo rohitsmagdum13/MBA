@@ -1,6 +1,17 @@
 """
-audit.py
-Lightweight audit trail for CSV → MySQL loads with improved error handling.
+Lightweight audit trail for CSV to MySQL loads with improved error handling.
+
+Tracks ETL operations from S3 to MySQL with timing, row counts, and error details.
+
+Module Input:
+    - S3 object metadata (bucket, key, size, hash)
+    - ETL operation results (success/failure, row counts)
+    - Lambda context (request ID if available)
+
+Module Output:
+    - Audit records in MySQL ingestion_audit table
+    - Audit IDs for tracking operations
+    - Status reports for monitoring
 """
 
 from __future__ import annotations
@@ -36,9 +47,33 @@ CREATE TABLE IF NOT EXISTS `ingestion_audit` (
 """
 
 class AuditLogger:
+    """
+    Provides static methods for ETL audit trail management.
+    
+    Manages audit records for tracking CSV ingestion from S3 to MySQL,
+    including timing, success metrics, and error details.
+    """
     @staticmethod
     def ensure_table() -> None:
-        """Create audit table if it doesn't exist with improved error handling."""
+        """
+        Create audit table if it doesn't exist.
+        
+        Creates the ingestion_audit table with appropriate schema for
+        tracking ETL operations including timing, status, and errors.
+        
+        Input:
+            None
+            
+        Output:
+            None
+            
+        Side Effects:
+            - Creates ingestion_audit table in MySQL
+            - Logs operation timing
+            
+        Raises:
+            Exception: If table creation fails
+        """
         try:
             logger.debug("Ensuring ingestion_audit table exists")
             start_time = time.time()
@@ -52,7 +87,30 @@ class AuditLogger:
     @staticmethod
     def start(s3_bucket: str, s3_key: str, table_name: str, content_md5: str, 
               size_bytes: int, lambda_request_id: str = None) -> str:
-        """Start audit trail with improved error handling and validation."""
+        """
+        Start audit trail for an ETL operation.
+        
+        Creates initial audit record marking the start of CSV processing.
+        
+        Args:
+            s3_bucket (str): Source S3 bucket name
+            s3_key (str): Source S3 object key
+            table_name (str): Target MySQL table name
+            content_md5 (str): MD5 hash of content (32 chars)
+            size_bytes (int): File size in bytes
+            lambda_request_id (Optional[str]): Lambda invocation ID
+            
+        Returns:
+            str: UUID audit ID for tracking this operation
+            
+        Raises:
+            ValueError: If required parameters are missing or invalid
+            Exception: If database insertion fails
+            
+        Side Effects:
+            - Inserts record into ingestion_audit table
+            - Ensures audit table exists
+        """
         
         # Validate inputs
         if not all([s3_bucket, s3_key, table_name, content_md5]):
@@ -100,7 +158,24 @@ class AuditLogger:
 
     @staticmethod
     def success(audit_id: str, rows_inserted: int, duration_ms: int) -> None:
-        """Mark audit as successful with validation."""
+        """
+        Mark audit record as successful.
+        
+        Updates audit record with success status and metrics.
+        
+        Args:
+            audit_id (str): UUID from start() call
+            rows_inserted (int): Number of rows loaded to MySQL
+            duration_ms (int): Total operation time in milliseconds
+            
+        Raises:
+            ValueError: If parameters are invalid
+            Exception: If database update fails
+            
+        Side Effects:
+            - Updates audit record status to SUCCESS
+            - Records completion time and metrics
+        """
         
         if not audit_id:
             raise ValueError("Audit ID is required")
@@ -147,7 +222,21 @@ class AuditLogger:
 
     @staticmethod
     def failure(audit_id: str, error_message: str, retry_count: int = 0) -> None:
-        """Mark audit as failed with error details."""
+        """
+        Mark audit record as failed.
+        
+        Updates audit record with failure status and error details.
+        
+        Args:
+            audit_id (str): UUID from start() call
+            error_message (str): Error description (truncated to 4000 chars)
+            retry_count (int): Number of retry attempts made
+            
+        Side Effects:
+            - Updates audit record status to FAILED
+            - Records error message and retry count
+            - Does not raise exceptions (logs errors internally)
+        """
         
         if not audit_id:
             raise ValueError("Audit ID is required")
