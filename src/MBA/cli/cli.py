@@ -27,10 +27,15 @@ Author: MBA Healthcare Management Associates
 Version: 1.0.0
 """
 import argparse
+import asyncio
+import json
 import sys
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Set, Optional, List, Tuple
+import click
+
+from MBA.agents.orchestration_agent.agent import OrchestratorAgent
 
 from MBA.core.settings import settings
 from MBA.core.logging_config import get_logger, setup_root_logger
@@ -717,5 +722,48 @@ def run_microservices(args: argparse.Namespace) -> int:
         return 1
 
 
+# Click CLI group for additional commands
+@click.group()
+def mba():
+    """MBA CLI commands."""
+    pass
+
+@mba.command("orchestrate")
+@click.option("--query", required=True, help="User question with any member hints")
+def orchestrate_cmd(query: str):
+    """
+    Run the Orchestrator Agent from CLI.
+    Example:
+      uv run python -m MBA.cli.cli orchestrate --query \
+      "What's my deductible for 2025? member_id=123 dob=1990-05-15"
+    """
+    payload = {"query": query}
+    orch = OrchestratorAgent()
+    result = asyncio.run(orch.run(payload))
+    click.echo(json.dumps(result, indent=2))
+
+@mba.command("verify")
+@click.option("--member-id", required=True, help="Member ID")
+@click.option("--dob", required=True, help="Date of birth (YYYY-MM-DD)")
+@click.option("--name", help="Member name (optional)")
+def verify_cmd(member_id: str, dob: str, name: str = None):
+    """
+    Verify member identity.
+    Example:
+      uv run python -m MBA.cli.cli verify --member-id M1001 --dob 2005-05-23
+    """
+    from MBA.agents.member_verification_agent.tools import verify_member
+    
+    params = {"member_id": member_id, "dob": dob}
+    if name:
+        params["name"] = name
+    
+    result = asyncio.run(verify_member(params))
+    click.echo(json.dumps(result, indent=2))
+
 if __name__ == "__main__":
-    main()
+    # Check if we're being called with click commands
+    if len(sys.argv) > 1 and sys.argv[1] in ['orchestrate', 'verify']:
+        mba()
+    else:
+        main()

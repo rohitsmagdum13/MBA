@@ -1,36 +1,73 @@
 MBA S3 Data Ingestion System
+
 📋 Table of Contents
 
 Overview
+
 Architecture
+
 Folder Structure
+
 System Components
+
 Execution Modes
+
 Installation
+
 Configuration
+
 Usage
+
 End-to-End Flow
+
 Function I/O Summary
+
 API Documentation
+
 Database Schema
+
 Monitoring & Logging
+
 Troubleshooting
 
+Security Considerations
+
+License
+
+Contributors
+
+Support
+
+
+
 🎯 Overview
+
 The MBA S3 Data Ingestion System is a robust, scalable solution for managing healthcare data uploads from local storage to AWS S3 with subsequent ETL processing into MySQL RDS. The system handles member benefit data and insurance policy documents with intelligent duplicate detection, comprehensive audit trails, and multiple deployment modes.
+
 Key Features
 
 Dual-mode Architecture: Monolithic for simplicity, Microservices for scale
+
 Intelligent Duplicate Detection: MD5 hash-based deduplication
+
 Automatic Scope Detection: Identifies MBA vs Policy data from paths
+
 Comprehensive Audit Trail: Full tracking of all operations
+
 Real-time Monitoring: Streamlit dashboard for visual management
+
 ETL Pipeline: Automatic CSV to MySQL processing via Lambda
+
 Error Recovery: Retry logic with exponential backoff
+
 Bulk Operations: Concurrent uploads with configurable parallelism
 
+
+
 🏗 Architecture
+
 High-Level Architecture Diagram
+
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                         MBA S3 DATA INGESTION ARCHITECTURE                   │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -84,6 +121,11 @@ High-Level Architecture Diagram
                         │  │  Audit Tables  │  │
                         │  └────────────────┘  │
                         └──────────────────────┘
+
+
+
+
+
 📁 Folder Structure
 mba-ingestion/
 ├── .env                                  # Environment configuration
@@ -155,19 +197,24 @@ mba-ingestion/
             ├── producer.py             # Job producer service
             ├── queue.py                # In-memory job queue
             └── worker.py               # Job worker service
+
+
+
 🔧 System Components
 Core Components
+
 1. Settings Module (core/settings.py)
 
 Purpose: Centralized configuration management using Pydantic
 Functionality:
 
 Loads configuration from environment variables and .env file
+
 Validates settings on startup
+
 Provides helper methods for bucket/prefix resolution
+
 Generates database connection URLs
-
-
 
 2. Logging Configuration (core/logging_config.py)
 
@@ -175,11 +222,12 @@ Purpose: Standardized logging across all modules
 Features:
 
 Dual output: Console and rotating file handlers
+
 Structured format with timestamps, levels, and context
+
 Thread-safe logger management
+
 Prevents duplicate handler configuration
-
-
 
 3. Exception Hierarchy (core/exceptions.py)
 
@@ -187,176 +235,207 @@ Purpose: Domain-specific error handling
 Exception Types:
 
 MBAIngestionError: Base exception for all errors
+
 ConfigError: Configuration/environment issues
+
 UploadError: S3 upload failures
+
 FileDiscoveryError: Filesystem scanning errors
+
 QueueError: Job queue failures
 
-
-
 Service Layer
+
 4. S3 Client (services/s3_client.py)
 
 Key Functions:
 
 build_session(): Creates AWS session with credential resolution
+
 upload_file(): Uploads with retry logic and duplicate detection
+
 check_s3_file_exists(): HEAD-based existence checking
+
 list_s3_files(): Paginated object listing
+
 calculate_file_hash(): MD5/SHA256 computation
-
-
 
 5. File Utilities (services/file_utils.py)
 
 Key Functions:
 
 discover_files(): Recursive directory scanning with filters
+
 detect_file_type(): Extension-based type categorization
+
 detect_scope_from_path(): Automatic MBA/Policy detection
+
 build_s3_key(): Structured S3 key generation
-
-
 
 6. Duplicate Detector (services/duplicate_detector.py)
 
 Features:
 
 Local file hash computation with caching
+
 S3 duplicate checking via size comparison
+
 Persistent cache in JSON format
+
 Detailed duplicate reports with statistics
 
-
-
 ETL Pipeline
+
 7. Database Module (etl/db.py)
 
 Capabilities:
 
 Singleton engine pattern with connection pooling
+
 Automatic database creation if missing
+
 Retry logic with exponential backoff
+
 Bulk insert optimization
+
 Health check endpoints
-
-
 
 8. CSV Schema Inference (etl/csv_schema.py)
 
 Process:
 
 Detects CSV delimiter using sniffing
+
 Samples rows for type detection
+
 Infers MySQL data types (DATETIME, BIGINT, VARCHAR, etc.)
+
 Generates CREATE TABLE DDL statements
-
-
 
 9. ETL Loader (etl/loader.py)
 
 Pipeline Steps:
 
 Downloads S3 object to memory
+
 Computes MD5 hash for audit
+
 Infers schema from CSV content
+
 Creates table if not exists
+
 Transforms and loads data in batches
+
 Records audit trail
-
-
 
 10. Audit System (etl/audit.py)
 
 Tracking:
 
 Operation start/success/failure
+
 Processing duration
+
 Row counts
+
 Error messages
+
 Retry attempts
 
-
-
 🚀 Execution Modes
+
 Why Two Modes?
 The system supports both Monolithic and Microservices modes to address different deployment scenarios:
+
 Monolithic Mode
+
 Use Case: Small to medium deployments, development, testing
 Characteristics:
 
 Single process handles everything
+
 Simple deployment and debugging
+
 Lower latency (no queue overhead)
+
 Limited scalability
 
 How it Works:
 User → CLI → File Discovery → Duplicate Check → Direct Upload → S3
+
 Microservices Mode
+
 Use Case: Large-scale production deployments
 Characteristics:
 
 Distributed processing across multiple components
+
 Horizontal scalability
+
 Fault isolation
+
 Better resource utilization
 
 Components:
-Producer Service (microservices/producer.py)
 
+Producer Service (microservices/producer.py)
 Role: Job creation and enqueueing
 Process:
 
 Discovers files based on criteria
+
 Creates job objects with S3 coordinates
+
 Enqueues jobs for workers
-
-
 Output: Jobs in queue ready for processing
 
 Queue System (microservices/queue.py)
-
 Role: Job distribution and coordination
 Features:
 
 Thread-safe in-memory storage
+
 FIFO processing order
+
 Statistics tracking
+
 Blocking/non-blocking retrieval
 
-
-
 Worker Service (microservices/worker.py)
-
 Role: Actual file upload execution
 Process:
 
 Retrieves jobs from queue
+
 Performs uploads with retry logic
+
 Updates statistics
+
 Marks jobs complete
-
-
 Scaling: Multiple workers can run concurrently
 
 API Service (microservices/api.py)
-
 Role: REST interface for job submission
 Endpoints:
 
 POST /jobs: Submit new upload job
+
 GET /health: Service health check
+
 GET /stats: Queue statistics
-
-
-Use Case: Integration with external systems
 
 Microservices Flow:
 User → Producer → Queue → Workers → S3
-         ↓                    ↑
-      API Service ────────────┘
+      ↓            ↑
+    API Service ───────────────┘
+
+
+
+
 📊 End-to-End Flow
+
 Complete System Flow (ASCII)
+
 ┌──────────────────────────────────────────────────────────────────────────────────┐
 │                            END-TO-END DATA FLOW DIAGRAM                           │
 └──────────────────────────────────────────────────────────────────────────────────┘
@@ -487,12 +566,21 @@ START
               │
               ▼
             END
+
+
+
+
+
 📥 Installation
+
 Prerequisites
 
 Python 3.9+
+
 AWS Account with S3 and RDS access
+
 MySQL RDS instance (or local MySQL for development)
+
 AWS CLI configured (optional)
 
 Setup Steps
@@ -502,10 +590,12 @@ Clone Repository
 bashgit clone https://github.com/your-org/mba-ingestion.git
 cd mba-ingestion
 
+
 Create Virtual Environment
 
 bashpython -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
+
 
 Install Dependencies
 
@@ -513,16 +603,21 @@ bashpip install -r requirements.txt
 # Or using pyproject.toml
 pip install -e .
 
+
 Configure Environment
 
 bashcp .env.example .env
 # Edit .env with your AWS and database credentials
 
+
 Initialize Database
 
 bashpython scripts/init.py
+
 ⚙ Configuration
+
 Environment Variables (.env)
+
 ini# AWS Configuration
 AWS_ACCESS_KEY_ID=your_access_key
 AWS_SECRET_ACCESS_KEY=your_secret_key
@@ -547,10 +642,14 @@ RDS_PARAMS=charset=utf8mb4
 LOG_LEVEL=INFO
 LOG_DIR=logs
 LOG_FILE=app.log
+
 🎮 Usage
+
 CLI Commands
-1. Monolithic Mode (Default)
-bash# Basic upload with auto-detection
+
+Monolithic Mode (Default)
+
+# Basic upload with auto-detection
 MBA-ingest --input ./data --auto-detect-scope
 
 # Upload specific scope with filters
@@ -561,8 +660,11 @@ MBA-ingest --input ./data --auto-detect-scope --dry-run
 
 # Force overwrite existing files
 MBA-ingest --input ./data --auto-detect-scope --overwrite
-2. Microservices Mode
-bash# Start producer to enqueue jobs
+
+
+Microservices Mode
+
+# Start producer to enqueue jobs
 MBA-ingest --mode micro --input ./data --scope mba
 
 # Start workers (in separate terminals)
@@ -570,19 +672,28 @@ MBA-worker --concurrency 4
 
 # Start API server
 MBA-api
-3. Duplicate Detection
-bash# Check local duplicates only
+
+
+Duplicate Detection
+
+# Check local duplicates only
 MBA-ingest --mode check-duplicates --input ./data
 
 # Check against S3 as well
 MBA-ingest --mode check-duplicates --input ./data --check-s3
+
+
 Streamlit UI
-bash# Start web interface
+
+# Start web interface
 streamlit run src/MBA/streamlit_app.py
 # Or using the launcher
 MBA-app
+
+
 API Endpoints
-bash# Submit job via API
+
+# Submit job via API
 curl -X POST http://localhost:8000/jobs \
   -H "Content-Type: application/json" \
   -d '{"path": "/data/mba/csv/data.csv", "scope": "mba"}'
@@ -592,138 +703,6 @@ curl http://localhost:8000/health
 
 # Get statistics
 curl http://localhost:8000/stats
-📈 Function I/O Summary
-Core Functions
-ModuleFunctionInputOutputPurposecli.pyUploader.__init__()scope, aws_profile, region, flagsNoneInitialize uploaderUploader.upload_single()file_path, input_dir(Path, bool, str)Upload one fileUploader.upload_batch()files[], input_dir, concurrency{stats}Parallel uploadrun_monolith()argparse.Namespaceexit_codeMain monolithic flows3_client.pybuild_session()profile, keys, regionboto3.SessionAWS session factoryupload_file()session, bucket, path, key(bool, message)S3 upload with retrycheck_s3_file_exists()session, bucket, key(exists, metadata)Existence checkcalculate_file_hash()file_path, algorithmhex_digestHash computationfile_utils.pydiscover_files()dir, filters, scope[Path]Find filesdetect_scope_from_path()path, base_dirscope or NoneAuto-detect scopebuild_s3_key()scope, path, prefixs3_keyGenerate S3 pathduplicate_detector.pyscan_local_directory()directory, recursive{hash: [paths]}Find duplicatescheck_s3_duplicate()session, path, bucket, key(is_dup, metadata)S3 comparisongenerate_report()duplicates, base_dirreport_stringFormat resultsdb.pyget_engine()NoneEngineDatabase connectionexec_sql()sql, paramsNoneExecute statementbulk_insert()table, rowsrow_countBatch insertloader.pyCsvToMySQLLoader.run()batch_sizeLoadResultComplete ETLqueue.pyJobQueue.put()jobNoneEnqueue jobJobQueue.get()timeoutJob or NoneDequeue jobJobQueue.stats()None{statistics}Queue metrics
-🗄 Database Schema
-Business Tables
-sql-- Member Data
-CREATE TABLE memberdata (
-    member_id BIGINT NOT NULL,
-    first_name VARCHAR(100),
-    last_name VARCHAR(100),
-    dob DATE,
-    enrollment_date DATE,
-    plan_id VARCHAR(50),
-    status VARCHAR(20)
-);
-
--- Plan Details
-CREATE TABLE plan_details (
-    plan_id VARCHAR(50) NOT NULL,
-    plan_name VARCHAR(255),
-    plan_type VARCHAR(50),
-    premium DECIMAL(10,2),
-    deductible DECIMAL(10,2),
-    out_of_pocket_max DECIMAL(10,2)
-);
-
--- Benefit Accumulator
-CREATE TABLE benefit_accumulator (
-    member_id BIGINT NOT NULL,
-    benefit_year INT,
-    ytd_deductible DECIMAL(10,2),
-    ytd_out_of_pocket DECIMAL(10,2),
-    last_updated DATETIME
-);
-
--- Deductibles & OOP
-CREATE TABLE deductibles_oop (
-    member_id BIGINT NOT NULL,
-    service_date DATE,
-    service_type VARCHAR(100),
-    amount DECIMAL(10,2),
-    applied_to VARCHAR(50)
-);
-Audit Table
-sqlCREATE TABLE ingestion_audit (
-    id VARCHAR(36) PRIMARY KEY,
-    s3_bucket VARCHAR(255) NOT NULL,
-    s3_key TEXT NOT NULL,
-    table_name VARCHAR(255) NOT NULL,
-    content_md5 CHAR(32) NOT NULL,
-    bytes BIGINT NOT NULL,
-    started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    finished_at DATETIME,
-    duration_ms INT,
-    rows_inserted INT,
-    status ENUM('STARTED','SUCCESS','FAILED') NOT NULL,
-    error_message TEXT,
-    lambda_request_id VARCHAR(64),
-    retry_count INT DEFAULT 0,
-    INDEX idx_status (status),
-    INDEX idx_started_at (started_at)
-);
-📊 Monitoring & Logging
-Log Format
-2024-01-15 10:30:45 | INFO     | MBA.cli:upload_single:145 | File uploaded successfully
-2024-01-15 10:30:46 | WARNING  | MBA.s3_client:upload_file:234 | Retry attempt 2/3
-2024-01-15 10:30:47 | ERROR    | MBA.db:connect:89 | Database connection failed
-Monitoring Points
-
-Upload success/failure rates
-Duplicate detection efficiency
-ETL processing times
-Database connection pool status
-Lambda execution metrics
-Queue depth (microservices mode)
-
-Streamlit Dashboard Metrics
-
-Real-time upload progress
-Historical trends
-File type distribution
-Error analysis
-Performance metrics
-
-🐛 Troubleshooting
-Common Issues
-1. AWS Credentials Error
-Error: NoCredentialsError
-Solution: Configure AWS CLI or set environment variables
-2. Database Connection Failed
-Error: OperationalError 1049
-Solution: Database will be auto-created, ensure RDS is accessible
-3. Duplicate Detection Slow
-Issue: Large directories take long to scan
-Solution: Use cache file, reduce sample size
-4. Lambda Timeout
-Error: Task timed out after 15 seconds
-Solution: Increase Lambda timeout or reduce batch size
-5. Queue Memory Issues
-Issue: In-memory queue grows too large
-Solution: Process workers faster or implement Redis queue
-🔒 Security Considerations
-
-Store credentials in environment variables, never in code
-Use IAM roles for EC2/Lambda deployments
-Enable S3 server-side encryption (AES256)
-Implement VPC endpoints for private S3 access
-Use RDS security groups to restrict database access
-Enable CloudTrail for audit logging
-Implement API authentication for production
-
-📝 License
-This project is proprietary to MBA Healthcare Management Associates.
-👥 Contributors
-
-Development Team - MBA Healthcare
-DevOps Team - Infrastructure setup
-Data Team - ETL pipeline design
-
-📧 Support
-For issues or questions:
-
-Email: support@mba-healthcare.com
-Internal Slack: #mba-ingestion-support
-Documentation: https://docs.mba-healthcare.internal
-
-
-Version: 1.0.0
-Last Updated: December 2024
-Status: Production Ready
-
-
 
 
 

@@ -40,3 +40,5 @@ PyMySQL
 # Pretty-print tabular data in CLI outputs and reports
 tabulate
 git-filter-repo
+strands-agents
+strands-agents-tools

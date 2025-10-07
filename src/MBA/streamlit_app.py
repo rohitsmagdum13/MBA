@@ -34,6 +34,8 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError, OperationalError
 import sqlalchemy
 
+from MBA.agents.orchestration_agent.agent import OrchestratorAgent
+
 # Add src to path
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
@@ -1520,6 +1522,46 @@ def main():
 
     with tabs[6]:
         render_settings_tab()
+    
+    # Agent section
+    with st.expander("🤖 AI Agents", expanded=False):
+        agent_tab1, agent_tab2 = st.tabs(["🔍 Member Verification", "🤖 Orchestrator"])
+        
+        with agent_tab1:
+            st.write("Verify member identity using database lookup.")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                member_id = st.text_input("Member ID", placeholder="M1001")
+            with col2:
+                dob = st.date_input("Date of Birth")
+            with col3:
+                name = st.text_input("Name (optional)", placeholder="John Doe")
+            
+            if st.button("Verify Member", key="verify_member") and member_id and dob:
+                from MBA.agents.member_verification_agent.tools import verify_member
+                params = {"member_id": member_id, "dob": str(dob)}
+                if name:
+                    params["name"] = name
+                
+                with st.spinner("Verifying member..."):
+                    result = asyncio.run(verify_member(params))
+                
+                if result.get("valid"):
+                    st.success(f"✅ Member verified: {result.get('name', 'N/A')}")
+                elif result.get("error"):
+                    st.error(f"❌ Error: {result['error']}")
+                else:
+                    st.warning(f"❌ Verification failed: {result.get('message', 'Unknown error')}")
+        
+        with agent_tab2:
+            st.write("Ask end-to-end questions. Member verification is enforced as needed.")
+            q = st.text_input("Question",
+                              placeholder="e.g., What's my deductible for 2025? member_id=M1001 dob=2005-05-23")
+            if st.button("Run Orchestrator", key="run_orchestrator") and q:
+                orch = OrchestratorAgent()
+                with st.spinner("Running orchestrator..."):
+                    result = asyncio.run(orch.run({"query": q}))
+                st.success(result.get("summary") or result)
         
         # Footer
         st.markdown("---")

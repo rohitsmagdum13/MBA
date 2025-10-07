@@ -10,6 +10,7 @@ from ..core.logging_config import get_logger, setup_root_logger
 from ..core.exceptions import ConfigError
 from ..services.file_utils import build_s3_key
 from .queue import Job, job_queue
+from ..agents.orchestration_agent.agent import OrchestratorAgent
 
 logger = get_logger(__name__)
 
@@ -49,6 +50,15 @@ def create_app() -> FastAPI:
         description="API for submitting file upload jobs",
         version="0.1.0"
     )
+    
+    # Create orchestrator agent instance
+    orchestrator_agent = None
+    
+    def get_orchestrator():
+        nonlocal orchestrator_agent
+        if orchestrator_agent is None:
+            orchestrator_agent = OrchestratorAgent()
+        return orchestrator_agent
     
     @app.get("/health", response_model=HealthResponse)
     async def health_check():
@@ -125,7 +135,43 @@ def create_app() -> FastAPI:
         """Get queue statistics."""
         return job_queue.stats()
     
+    @app.post("/orchestrate")
+    async def orchestrate(payload: dict):
+        """
+        Orchestrate a user query through the Orchestrator Agent.
+        Payload shape:
+          { "query": "What's my deductible for 2025? member_id=123 dob=1990-05-15" }
+        Returns:
+          { "summary": "<final answer>" }
+        """
+        try:
+            agent = get_orchestrator()
+            return await agent.run(payload)
+        except Exception as e:
+            logger.error(f"Orchestrator error: {e}", exc_info=True)
+            return {"summary": f"Error processing request: {str(e)}"}
+    
+    @app.post("/verify")
+    async def verify_member(payload: dict):
+        """
+        Verify member identity.
+        Payload shape:
+          { "member_id": "M1001", "dob": "2005-05-23", "name": "optional" }
+        Returns:
+          { "valid": true/false, "member_id": "...", "name": "..." }
+        """
+        try:
+            
+            return await verify_member(payload)
+        except Exception as e:
+            logger.error(f"Verification error: {e}", exc_info=True)
+            return {"error": f"Verification failed: {str(e)}"}
+    
     return app
+
+
+# Create app instance for uvicorn
+app = create_app()
 
 
 def run_server():

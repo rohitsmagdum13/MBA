@@ -91,6 +91,11 @@ class Settings(BaseSettings):
     log_dir: Path = Path("logs")
     log_file: str = "app.log"
 
+    # ---------------- Model Configuration ----------------
+    model_provider: str = "bedrock"
+    model_name: str = "anthropic.claude-3-sonnet-20240229-v1:0"
+    model_region: str = "us-east-1"
+
     # ---------------- Pydantic Settings ----------------
     model_config = SettingsConfigDict(
         env_file=".env",
