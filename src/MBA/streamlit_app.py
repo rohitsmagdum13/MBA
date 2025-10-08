@@ -34,7 +34,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError, OperationalError
 import sqlalchemy
 
-from MBA.agents.orchestration_agent.agent import OrchestratorAgent
+from MBA.agents.orchestration_agent.wrapper import OrchestratorAgent
 
 # Add src to path
 import sys
@@ -1525,9 +1525,9 @@ def main():
     
     # Agent section
     with st.expander("🤖 AI Agents", expanded=False):
-        agent_tab1, agent_tab2 = st.tabs(["🔍 Member Verification", "🤖 Orchestrator"])
+        agent_tabs = st.tabs(["🔍 Member Verification", "🎯 Intent Analysis", "💰 Benefits", "💳 Deductible", "🤖 Orchestrator"])
         
-        with agent_tab1:
+        with agent_tabs[0]:
             st.write("Verify member identity using database lookup.")
             col1, col2, col3 = st.columns(3)
             with col1:
@@ -1553,7 +1553,72 @@ def main():
                 else:
                     st.warning(f"❌ Verification failed: {result.get('message', 'Unknown error')}")
         
-        with agent_tab2:
+        with agent_tabs[1]:
+            st.write("Analyze user queries to identify intent and extract parameters.")
+            query = st.text_area("User Query", placeholder="What's my deductible for 2025?")
+            
+            if st.button("Analyze Intent", key="analyze_intent") and query:
+                from MBA.agents.intent_identification_agent.tools import identify_intent_and_params
+                
+                with st.spinner("Analyzing intent..."):
+                    result = asyncio.run(identify_intent_and_params(query))
+                
+                if result.get("status") == "success":
+                    st.success(f"✅ Intent: {result.get('intent')}")
+                    if result.get('params'):
+                        st.json(result['params'])
+                else:
+                    st.error(f"❌ Error: {result.get('error', 'Unknown error')}")
+        
+        with agent_tabs[2]:
+            st.write("Get benefit accumulator information for members.")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                ben_member_id = st.text_input("Member ID", placeholder="M1001", key="ben_member")
+            with col2:
+                service = st.selectbox("Service", ["Massage Therapy", "Physical Therapy", "Neurodevelopmental Therapy", "Skilled Nursing Facility", "Smoking Cessation", "Rehabilitation – Outpatient"])
+            with col3:
+                plan_year = st.number_input("Plan Year", min_value=2020, max_value=2030, value=2025)
+            
+            if st.button("Get Benefits", key="get_benefits") and ben_member_id:
+                from MBA.agents.benefit_accumulator_agent.tools import get_benefit_details
+                params = {"member_id": ben_member_id, "service": service, "plan_year": plan_year}
+                
+                with st.spinner("Getting benefit details..."):
+                    result = asyncio.run(get_benefit_details(params))
+                
+                if result.get("status") == "success":
+                    st.success(f"✅ Benefits found for {service}")
+                    st.json(result)
+                elif result.get("status") == "not_found":
+                    st.warning("❌ No benefit data found")
+                else:
+                    st.error(f"❌ Error: {result.get('error', 'Unknown error')}")
+        
+        with agent_tabs[3]:
+            st.write("Get deductible and out-of-pocket information for members.")
+            col1, col2 = st.columns(2)
+            with col1:
+                ded_member_id = st.text_input("Member ID", placeholder="M1001", key="ded_member")
+            with col2:
+                ded_plan_year = st.number_input("Plan Year", min_value=2020, max_value=2030, value=2025, key="ded_year")
+            
+            if st.button("Get Deductible Info", key="get_deductible") and ded_member_id:
+                from MBA.agents.deductible_oop_agent.tools import get_deductible_oop
+                params = {"member_id": ded_member_id, "plan_year": ded_plan_year}
+                
+                with st.spinner("Getting deductible information..."):
+                    result = asyncio.run(get_deductible_oop(params))
+                
+                if result.get("status") == "success":
+                    st.success("✅ Deductible information found")
+                    st.json(result)
+                elif result.get("status") == "not_found":
+                    st.warning("❌ No deductible data found")
+                else:
+                    st.error(f"❌ Error: {result.get('error', 'Unknown error')}")
+        
+        with agent_tabs[4]:
             st.write("Ask end-to-end questions. Member verification is enforced as needed.")
             q = st.text_input("Question",
                               placeholder="e.g., What's my deductible for 2025? member_id=M1001 dob=2005-05-23")

@@ -10,7 +10,7 @@ from ..core.logging_config import get_logger, setup_root_logger
 from ..core.exceptions import ConfigError
 from ..services.file_utils import build_s3_key
 from .queue import Job, job_queue
-from ..agents.orchestration_agent.agent import OrchestratorAgent
+from ..agents.orchestration_agent.wrapper import OrchestratorAgent
 
 logger = get_logger(__name__)
 
@@ -152,7 +152,7 @@ def create_app() -> FastAPI:
             return {"summary": f"Error processing request: {str(e)}"}
     
     @app.post("/verify")
-    async def verify_member(payload: dict):
+    async def verify_member_api(payload: dict):
         """
         Verify member identity.
         Payload shape:
@@ -161,11 +161,60 @@ def create_app() -> FastAPI:
           { "valid": true/false, "member_id": "...", "name": "..." }
         """
         try:
-            
+            from ..agents.member_verification_agent.tools import verify_member
             return await verify_member(payload)
         except Exception as e:
             logger.error(f"Verification error: {e}", exc_info=True)
             return {"error": f"Verification failed: {str(e)}"}
+    
+    @app.post("/intent")
+    async def identify_intent(payload: dict):
+        """
+        Identify intent from user query.
+        Payload shape:
+          { "query": "What's my deductible for 2025?" }
+        Returns:
+          { "intent": "get_deductible_oop", "params": {...} }
+        """
+        try:
+            from ..agents.intent_identification_agent.tools import identify_intent_and_params
+            query = payload.get("query", "")
+            return await identify_intent_and_params(query)
+        except Exception as e:
+            logger.error(f"Intent identification error: {e}", exc_info=True)
+            return {"error": f"Intent identification failed: {str(e)}"}
+    
+    @app.post("/benefits")
+    async def get_benefits(payload: dict):
+        """
+        Get benefit accumulator information.
+        Payload shape:
+          { "member_id": "M1001", "service": "Massage Therapy", "plan_year": 2025 }
+        Returns:
+          { "status": "success", "remaining": 3, "used": 2, ... }
+        """
+        try:
+            from ..agents.benefit_accumulator_agent.tools import get_benefit_details
+            return await get_benefit_details(payload)
+        except Exception as e:
+            logger.error(f"Benefits error: {e}", exc_info=True)
+            return {"error": f"Benefits retrieval failed: {str(e)}"}
+    
+    @app.post("/deductible")
+    async def get_deductible(payload: dict):
+        """
+        Get deductible and out-of-pocket information.
+        Payload shape:
+          { "member_id": "M1001", "plan_year": 2025 }
+        Returns:
+          { "status": "success", "individual_deductible": {...}, "family_deductible": {...} }
+        """
+        try:
+            from ..agents.deductible_oop_agent.tools import get_deductible_oop
+            return await get_deductible_oop(payload)
+        except Exception as e:
+            logger.error(f"Deductible error: {e}", exc_info=True)
+            return {"error": f"Deductible retrieval failed: {str(e)}"}
     
     return app
 

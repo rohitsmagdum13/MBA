@@ -1,10 +1,14 @@
 """
-Member Verification Agent for MBA project.
+Deductible and Out-of-Pocket (OOP) Agent for MBA project.
+
+This module provides the main DeductibleOOPAgent class that retrieves
+deductible and out-of-pocket expense data from the MySQL RDS database
+for member financial tracking and planning.
 """
 
 from strands import Agent
 import boto3
-from .tools import verify_member
+from .tools import get_deductible_oop
 from .prompt import SYSTEM_PROMPT
 from ...core.settings import settings
 from ...core.logging_config import get_logger
@@ -24,9 +28,9 @@ session = boto3.Session(**session_kwargs)
 bedrock_model = session.client('bedrock-runtime')
 
 # Create strands agent instance
-verification_agent = Agent(
-    name="MemberVerificationAgent",
+deductible_oop_agent = Agent(
+    name="DeductibleOOPAgent",
     system_prompt=SYSTEM_PROMPT,
-    tools=[verify_member],
+    tools=[get_deductible_oop],
     model=bedrock_model
 )

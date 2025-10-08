@@ -1,10 +1,13 @@
 """
-Member Verification Agent for MBA project.
+Benefit Accumulator Agent for MBA project.
+
+This module provides the main BenefitAccumulatorAgent class that retrieves
+benefit accumulator data from the MySQL RDS database for member benefit tracking.
 """
 
 from strands import Agent
 import boto3
-from .tools import verify_member
+from .tools import get_benefit_details
 from .prompt import SYSTEM_PROMPT
 from ...core.settings import settings
 from ...core.logging_config import get_logger
@@ -24,9 +27,9 @@ session = boto3.Session(**session_kwargs)
 bedrock_model = session.client('bedrock-runtime')
 
 # Create strands agent instance
-verification_agent = Agent(
-    name="MemberVerificationAgent",
+accumulator_agent = Agent(
+    name="BenefitAccumulatorAgent",
     system_prompt=SYSTEM_PROMPT,
-    tools=[verify_member],
+    tools=[get_benefit_details],
     model=bedrock_model
 )

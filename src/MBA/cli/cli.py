@@ -35,7 +35,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Set, Optional, List, Tuple
 import click
 
-from MBA.agents.orchestration_agent.agent import OrchestratorAgent
+from MBA.agents.orchestration_agent.wrapper import OrchestratorAgent
 
 from MBA.core.settings import settings
 from MBA.core.logging_config import get_logger, setup_root_logger
@@ -761,9 +761,56 @@ def verify_cmd(member_id: str, dob: str, name: str = None):
     result = asyncio.run(verify_member(params))
     click.echo(json.dumps(result, indent=2))
 
+@mba.command("intent")
+@click.option("--query", required=True, help="User query to analyze")
+def intent_cmd(query: str):
+    """
+    Identify intent from user query.
+    Example:
+      uv run python -m MBA.cli.cli intent --query "What's my deductible for 2025?"
+    """
+    from MBA.agents.intent_identification_agent.tools import identify_intent_and_params
+    
+    result = asyncio.run(identify_intent_and_params(query))
+    click.echo(json.dumps(result, indent=2))
+
+@mba.command("benefits")
+@click.option("--member-id", required=True, help="Member ID")
+@click.option("--service", help="Specific service (optional)")
+@click.option("--plan-year", default=2025, help="Plan year (default: 2025)")
+def benefits_cmd(member_id: str, service: str = None, plan_year: int = 2025):
+    """
+    Get benefit accumulator information.
+    Example:
+      uv run python -m MBA.cli.cli benefits --member-id M1001 --service "Massage Therapy"
+    """
+    from MBA.agents.benefit_accumulator_agent.tools import get_benefit_details
+    
+    params = {"member_id": member_id, "plan_year": plan_year}
+    if service:
+        params["service"] = service
+    
+    result = asyncio.run(get_benefit_details(params))
+    click.echo(json.dumps(result, indent=2))
+
+@mba.command("deductible")
+@click.option("--member-id", required=True, help="Member ID")
+@click.option("--plan-year", default=2025, help="Plan year (default: 2025)")
+def deductible_cmd(member_id: str, plan_year: int = 2025):
+    """
+    Get deductible and out-of-pocket information.
+    Example:
+      uv run python -m MBA.cli.cli deductible --member-id M1001 --plan-year 2025
+    """
+    from MBA.agents.deductible_oop_agent.tools import get_deductible_oop
+    
+    params = {"member_id": member_id, "plan_year": plan_year}
+    result = asyncio.run(get_deductible_oop(params))
+    click.echo(json.dumps(result, indent=2))
+
 if __name__ == "__main__":
     # Check if we're being called with click commands
-    if len(sys.argv) > 1 and sys.argv[1] in ['orchestrate', 'verify']:
+    if len(sys.argv) > 1 and sys.argv[1] in ['orchestrate', 'verify', 'intent', 'benefits', 'deductible']:
         mba()
     else:
         main()

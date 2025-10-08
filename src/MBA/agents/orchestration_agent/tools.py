@@ -1,202 +1,143 @@
 """
-Tool adapters for sub-agents used by the Orchestrator.
+Tools for Orchestration Agent.
 
-Each tool is an async function decorated with `@tool` from AWS Strands.
-Logic is preserved. We only add docstrings, consistent logging,
-and fix the minor import inconsistency for the benefits query agent.
-
-Tools:
-- intent_agent_tool(query: {"query": str}) -> dict
-- verification_agent_tool(params: {...}) -> dict
-- deductibles_agent_tool(params: {...}) -> dict
-- accumulator_agent_tool(params: {...}) -> dict
-- benefits_query_agent_tool(params: {...}) -> dict
-  - If 'prepare' is True or 's3_prefix' exists, it uses the *prep* agent.
-  - Otherwise, it uses the *query* agent.
-- summary_agent_tool(responses: {...}) -> dict
+This module provides tools for orchestrating multiple sub-agents
+to handle complex member benefit queries and operations.
 """
 
-import logging
-from typing import Any, Dict
+from strands import tool
+from typing import Dict, Any
+from ...core.logging_config import get_logger
 
-from ...core.logging_config import get_logger  # Project-wide logging factory
-
-# --- Placeholder tool decorator ---
-def tool(func):
-    """Placeholder tool decorator"""
-    return func
-
-# --- Placeholder agent classes ---
-class PlaceholderAgent:
-    async def run(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        return {"error": "Agent not implemented"}
-
-# Placeholder agents
-intent_agent = PlaceholderAgent()
-verification_agent = PlaceholderAgent()
-deductibles_agent = PlaceholderAgent()
-accumulator_agent = PlaceholderAgent()
-benefits_query_prep_agent = PlaceholderAgent()
-benefits_query_agent = PlaceholderAgent()
-summary_agent = PlaceholderAgent()
-
-
-
-# Initialize module-level logger once (cheap, thread-safe in practice)
 logger = get_logger(__name__)
 
 
 @tool
-async def intent_agent_tool(query: dict) -> dict:
-    """
-    Identify the user's intent.
-
-    Parameters
-    ----------
-    query : dict
-        Expected shape: {"query": "<user natural language query>"}
-
-    Returns
-    -------
-    dict
-        Parsed intent and extracted parameters. Example:
-        {"intent": "get_deductible_oop", "params": {"member_id": "...", "plan_year": 2025}}
-    """
+async def orchestrate_query(params: Dict[str, Any]) -> Dict[str, Any]:
+    """Orchestrate query through sub-agents."""
     try:
-        response = await intent_agent.run({"query": query["query"]})
-        logger.info("Intent agent processed query: %s", query)
-        return response
+        query = params.get("query", "")
+        
+        # Step 1: Identify intent
+        from ..intent_identification_agent.wrapper import IntentIdentificationAgent
+        intent_agent = IntentIdentificationAgent()
+        intent_result = await intent_agent.analyze_query(query)
+        
+        params_extracted = intent_result.get('params', {})
+        
+        # Step 2: Verify member with flexible criteria
+        verification_params = {}
+        if params_extracted.get('member_id'):
+            verification_params['member_id'] = params_extracted['member_id']
+        if params_extracted.get('dob'):
+            verification_params['dob'] = params_extracted['dob']
+        if params_extracted.get('plan_name'):
+            verification_params['plan_name'] = params_extracted['plan_name']
+        if params_extracted.get('group_number'):
+            verification_params['group_number'] = params_extracted['group_number']
+        
+        if not verification_params:
+            return {"status": "error", "error": "member_id or dob required (plan_name/group_number not available in current schema)"}
+        
+        from ..member_verification_agent.wrapper import MemberVerificationAgent
+        verification_agent = MemberVerificationAgent()
+        from ..member_verification_agent.tools import verify_member
+        verification = await verify_member(verification_params)
+        
+        if not verification.get('valid'):
+            return {"status": "error", "error": "Member verification failed"}
+        
+        member_id = verification.get('member_id')
+        member_name = verification.get('name', 'Unknown')
+        dob = verification.get('dob', 'Unknown')
+        
+        # Step 3: Get all information (for "complete" or "everything" queries)
+        if any(word in query.lower() for word in ['complete', 'everything', 'all', 'show me']):
+            from ..benefit_accumulator_agent.wrapper import BenefitAccumulatorAgent
+            from ..deductible_oop_agent.wrapper import DeductibleOOPAgent
+            
+            accumulator_agent = BenefitAccumulatorAgent()
+            deductible_agent = DeductibleOOPAgent()
+            
+            # Get all benefits
+            all_benefits = await accumulator_agent.get_all_member_benefits(member_id)
+            
+            # Get deductibles
+            deductible_info = await deductible_agent.get_deductible_info(member_id, 2025)
+            
+            # Format output
+            output = [f"🧾 Member ID: {member_id} (DOB: {dob})\n"]
+            output.append(f"Name: {member_name}\n")
+            
+            # Benefits section
+            if all_benefits:
+                output.append("🏥 Benefits")
+                for benefit in all_benefits:
+                    output.append(f"  {benefit['service']}: {benefit['used']} used, {benefit['remaining']} remaining (Limit: {benefit['allowed_limit']})")
+            
+            # Deductibles section
+            if deductible_info.get('status') == 'success':
+                output.append("\n💰 Deductibles / OOP Summary")
+                
+                ind_ded = deductible_info.get('individual_deductible', {})
+                fam_ded = deductible_info.get('family_deductible', {})
+                ind_oop = deductible_info.get('out_of_pocket_maximum', {}).get('individual', {})
+                fam_oop = deductible_info.get('out_of_pocket_maximum', {}).get('family', {})
+                
+                output.append(f"  Deductible IND (In-Network): ${ind_ded.get('in_network', {}).get('remaining', 0):.0f} remaining")
+                output.append(f"  Deductible FAM (In-Network): ${fam_ded.get('in_network', {}).get('remaining', 0):.0f} remaining")
+                output.append(f"  OOP IND (In-Network): ${ind_oop.get('in_network', {}).get('remaining', 0):.0f} remaining")
+                output.append(f"  OOP FAM (In-Network): ${fam_oop.get('in_network', {}).get('remaining', 0):.0f} remaining")
+            
+            # Plan info (from memberdata table via verification)
+            output.append("\n🧩 Plan Info")
+            output.append(f"  Member verified in system")
+            
+            return {
+                "status": "success",
+                "summary": "\n".join(output)
+            }
+        
+        # Handle other intents...
+        return {"status": "success", "summary": "Query processed"}
+        
     except Exception as e:
-        logger.error("Intent agent failed: %s", e, exc_info=True)
-        return {"error": f"Intent agent failed: {str(e)}"}
+        logger.error(f"Orchestration failed: {e}", exc_info=True)
+        return {"status": "error", "error": str(e)}
 
 
-@tool
-async def verification_agent_tool(params: dict) -> dict:
+
+async def process_input(input_data: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Verify member identity.
-
-    Parameters
-    ----------
-    params : dict
-        Expected keys: "member_id", "dob", optional "name".
-
-    Returns
-    -------
-    dict
-        Verification result, e.g., {"verified": true, "member_id": "..."} or {"verified": false, ...}
+    Process input data for orchestration.
+    
+    Args:
+        input_data (Dict[str, Any]): Input data containing task and params
+    
+    Returns:
+        Dict[str, Any]: Processing result
     """
-    try:
-        result = await verification_agent.run({"params": params})
-        logger.info("Verification agent processed: %s", result)
-        return result
-    except Exception as e:
-        logger.error("Verification agent failed: %s", e, exc_info=True)
-        return {"error": f"Verification agent failed: {str(e)}"}
-
-
-@tool
-async def deductibles_agent_tool(params: dict) -> dict:
-    """
-    Fetch deductible / out-of-pocket values.
-
-    Parameters
-    ----------
-    params : dict
-        Expected keys: "member_id", "plan_year".
-
-    Returns
-    -------
-    dict
-        Deductible/OOP info for the current plan year.
-    """
-    try:
-        result = await deductibles_agent.run({"params": params})
-        logger.info("Deductibles agent processed: %s", result)
-        return result
-    except Exception as e:
-        logger.error("Deductibles agent failed: %s", e, exc_info=True)
-        return {"error": f"Deductibles agent failed: {str(e)}"}
-
-
-@tool
-async def accumulator_agent_tool(params: dict) -> dict:
-    """
-    Retrieve benefit accumulator values for a specific service.
-
-    Parameters
-    ----------
-    params : dict
-        Expected keys: "member_id", "service", "plan_year".
-
-    Returns
-    -------
-    dict
-        Accumulator details (used/remaining) for the member and service.
-    """
-    try:
-        result = await accumulator_agent.run({"params": params})
-        logger.info("Accumulator agent processed: %s", result)
-        return result
-    except Exception as e:
-        logger.error("Accumulator agent failed: %s", e, exc_info=True)
-        return {"error": f"Accumulator agent failed: {str(e)}"}
-
-
-@tool
-async def benefits_query_agent_tool(params: dict) -> dict:
-    """
-    Query or prepare member benefits.
-
-    Behavior
-    --------
-    - If 'prepare' is True OR 's3_prefix' is present: use the *prep* agent
-      (typically for indexing/pre-warming docs).
-    - Else: use the *query* agent for real-time question answering.
-
-    Parameters
-    ----------
-    params : dict
-        For prepare: {"prepare": true, "s3_prefix": "s3://.../policy/pdf/"}
-        For query:   {"query": "Does my plan cover X?", "plan_year": 2025, ...}
-
-    Returns
-    -------
-    dict
-        Agent-specific response structure.
-    """
-    try:
-        if params.get("prepare") or ("s3_prefix" in params):
-            result = await benefits_query_prep_agent.run({"params": params})
-        else:
-            result = await benefits_query_agent.run({"params": params})
-
-        logger.info("Benefits query agent processed: %s", result)
-        return result
-    except Exception as e:
-        logger.error("Benefits query agent failed: %s", e, exc_info=True)
-        return {"error": f"Benefits query agent failed: {str(e)}"}
-
-
-@tool
-async def summary_agent_tool(responses: dict) -> dict:
-    """
-    Summarize tool results into a single user-facing answer.
-
-    Parameters
-    ----------
-    responses : dict
-        A dictionary of intermediate tool results.
-
-    Returns
-    -------
-    dict
-        {"summary": "..."} — the final formatted response for the user.
-    """
-    try:
-        result = await summary_agent.run({"responses": responses})
-        logger.info("Summary agent processed: %s", result)
-        return result
-    except Exception as e:
-        logger.error("Summary agent failed: %s", e, exc_info=True)
-        return {"error": f"Summary agent failed: {str(e)}"}
+    logger.debug(f"Processing orchestration input: {input_data}")
+    
+    task = input_data.get("task")
+    if task == "orchestrate_query" and "params" in input_data:
+        try:
+            result = await orchestrate_query(params=input_data["params"])
+            logger.info("Orchestration processing completed successfully")
+            return {
+                "status": result.get("status", "success"),
+                "result": result
+            }
+        except Exception as e:
+            error_msg = f"Orchestration processing failed: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            return {
+                "status": "error",
+                "error": error_msg
+            }
+    
+    logger.warning(f"Invalid task or missing parameters: {task}")
+    return {
+        "status": "error",
+        "error": "Invalid task or missing parameters"
+    }

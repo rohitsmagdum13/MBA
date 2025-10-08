@@ -1,10 +1,10 @@
 """
-Member Verification Agent for MBA project.
+Intent Identification Agent for MBA project.
 """
 
 from strands import Agent
 import boto3
-from .tools import verify_member
+from .tools import identify_intent_and_params
 from .prompt import SYSTEM_PROMPT
 from ...core.settings import settings
 from ...core.logging_config import get_logger
@@ -24,9 +24,9 @@ session = boto3.Session(**session_kwargs)
 bedrock_model = session.client('bedrock-runtime')
 
 # Create strands agent instance
-verification_agent = Agent(
-    name="MemberVerificationAgent",
+intent_agent = Agent(
+    name="IntentIdentificationAgent",
     system_prompt=SYSTEM_PROMPT,
-    tools=[verify_member],
+    tools=[identify_intent_and_params],
     model=bedrock_model
 )
